@@ -14,3 +14,6 @@ wheels/
 
 # Notebooks
 notebooks/
+
+# data
+data/

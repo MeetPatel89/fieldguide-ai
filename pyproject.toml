@@ -1,7 +1,7 @@
 [project]
-name = "some-project"
+name = "fieldguide-ai"
 version = "0.1.0"
-description = "Add your description here"
+description = "A forward-deployed RAG agent that turns scattered company knowledge into executable customer/workflow decisions"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
