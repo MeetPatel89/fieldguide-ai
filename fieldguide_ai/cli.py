@@ -1,11 +1,13 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 from typing import TextIO
 
 from dotenv import load_dotenv
 
 from fieldguide_ai.demo import build_demo_messages, build_system_message
+from fieldguide_ai.ingestion import MarkdownSectionChunker, load_markdown_documents
 from fieldguide_ai.providers import LLMProvider, OpenAIProvider
 
 DEFAULT_MODEL = "gpt-5-nano"
@@ -69,6 +71,28 @@ def print_history(provider: LLMProvider, output_stream: TextIO = sys.stdout) -> 
         output_stream.write(f"{index}. {message.role}: {message.content}\n")
 
 
+def preview_chunks(
+    corpus_path: str | Path,
+    max_words: int,
+    limit: int,
+    output_stream: TextIO = sys.stdout,
+) -> None:
+    documents = load_markdown_documents(corpus_path)
+    chunker = MarkdownSectionChunker(max_words=max_words)
+    chunks = chunker.chunk_documents(documents)
+
+    output_stream.write(f"Loaded {len(documents)} documents and created {len(chunks)} chunks.\n")
+    for chunk in chunks[:limit]:
+        section = " > ".join(chunk.section_path)
+        doc_type = chunk.metadata.get("doc_type", "unknown")
+        output_stream.write(
+            f"\n{chunk.chunk_id} [{doc_type}] {section}\n"
+            f"source: {chunk.source_path}\n"
+            f"words: {len(chunk.content.split())}\n"
+            f"{_preview_text(chunk.content)}\n"
+        )
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fieldguide AI command-line interface.")
     parser.add_argument(
@@ -81,12 +105,38 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_MODEL,
         help=f"OpenAI model to use. Defaults to {DEFAULT_MODEL}.",
     )
+    parser.add_argument(
+        "--chunk-corpus",
+        metavar="PATH",
+        help="Preview markdown chunks for a corpus path without calling an LLM.",
+    )
+    parser.add_argument(
+        "--chunk-max-words",
+        type=int,
+        default=900,
+        help="Maximum words per preview chunk. Defaults to 900.",
+    )
+    parser.add_argument(
+        "--chunk-limit",
+        type=int,
+        default=10,
+        help="Number of preview chunks to print. Defaults to 10.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> None:
     load_dotenv()
     args = parse_args(argv)
+
+    if args.chunk_corpus:
+        preview_chunks(
+            corpus_path=args.chunk_corpus,
+            max_words=args.chunk_max_words,
+            limit=args.chunk_limit,
+        )
+        return
+
     provider = build_provider(model=args.model)
 
     if args.demo:
@@ -94,3 +144,10 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     run_chat_loop(provider)
+
+
+def _preview_text(text: str, max_chars: int = 240) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return f"{normalized[: max_chars - 3]}..."

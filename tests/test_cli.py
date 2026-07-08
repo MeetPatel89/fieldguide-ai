@@ -1,7 +1,9 @@
 import io
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
-from fieldguide_ai.cli import print_history, run_chat_loop
+from fieldguide_ai.cli import preview_chunks, print_history, run_chat_loop
 from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers.base import LLMProvider
 
@@ -50,3 +52,33 @@ class CliTest(unittest.TestCase):
         print_history(provider, output_stream=output_stream)
 
         self.assertEqual(output_stream.getvalue(), "1. system: Rules\n2. user: Hello\n")
+
+    def test_preview_chunks_prints_corpus_summary(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "doc.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "---",
+                        "doc_id: DOC-1",
+                        "title: Test Doc",
+                        "doc_type: runbook",
+                        "---",
+                        "",
+                        "# Test Doc",
+                        "",
+                        "## Summary",
+                        "",
+                        "This is a short section.",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            output_stream = io.StringIO()
+
+            preview_chunks(tmpdir, max_words=900, limit=5, output_stream=output_stream)
+
+        output = output_stream.getvalue()
+        self.assertIn("Loaded 1 documents and created 1 chunks.", output)
+        self.assertIn("DOC-1::chunk-0000 [runbook]", output)
+        self.assertIn("Test Doc > Summary", output)
