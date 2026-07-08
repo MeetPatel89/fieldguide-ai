@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -76,6 +77,7 @@ def preview_chunks(
     max_words: int,
     limit: int,
     output_stream: TextIO = sys.stdout,
+    details: bool = False,
 ) -> None:
     documents = load_markdown_documents(corpus_path)
     chunker = MarkdownSectionChunker(max_words=max_words)
@@ -85,12 +87,23 @@ def preview_chunks(
     for chunk in chunks[:limit]:
         section = " > ".join(chunk.section_path)
         doc_type = chunk.metadata.get("doc_type", "unknown")
-        output_stream.write(
-            f"\n{chunk.chunk_id} [{doc_type}] {section}\n"
-            f"source: {chunk.source_path}\n"
-            f"words: {len(chunk.content.split())}\n"
-            f"{_preview_text(chunk.content)}\n"
-        )
+        if details:
+            output_stream.write(f"\n{json.dumps(chunk.to_record(), indent=2)}\n")
+        else:
+            output_stream.write(
+                f"\n{chunk.chunk_id} [{doc_type}] {section}\n"
+                f"source: {chunk.source_path}\n"
+                f"words: {len(chunk.content.split())}\n"
+                f"{_preview_text(chunk.content)}\n"
+            )
+
+
+def _parse_bool(value: str) -> bool:
+    if value.lower() in {"true", "1", "yes"}:
+        return True
+    if value.lower() in {"false", "0", "no"}:
+        return False
+    raise argparse.ArgumentTypeError(f"expected true or false, got {value!r}")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -122,6 +135,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=10,
         help="Number of preview chunks to print. Defaults to 10.",
     )
+    parser.add_argument(
+        "--chunk-details",
+        nargs="?",
+        const=True,
+        default=False,
+        type=_parse_bool,
+        metavar="BOOL",
+        help="Print full JSON for each chunk. Use alone or pass true/false.",
+    )
     return parser.parse_args(argv)
 
 
@@ -134,6 +156,7 @@ def main(argv: list[str] | None = None) -> None:
             corpus_path=args.chunk_corpus,
             max_words=args.chunk_max_words,
             limit=args.chunk_limit,
+            details=args.chunk_details,
         )
         return
 
