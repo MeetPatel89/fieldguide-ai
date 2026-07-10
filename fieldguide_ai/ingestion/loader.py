@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -41,7 +42,8 @@ def _find_closing_frontmatter(lines: list[str]) -> int | None:
 
 def _parse_simple_yaml(lines: Iterable[str]) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
-    active_list_key: str | None = None
+    stack: list[tuple[int, dict[str, Any] | list[Any]]] = [(-1, metadata)]
+    pending_key: tuple[int, dict[str, Any], str] | None = None
 
     for raw_line in lines:
         line = raw_line.rstrip()
@@ -49,34 +51,62 @@ def _parse_simple_yaml(lines: Iterable[str]) -> dict[str, Any]:
         if not stripped or stripped.startswith("#"):
             continue
 
-        if stripped.startswith("- ") and active_list_key is not None:
-            metadata[active_list_key].append(_parse_scalar(stripped[2:].strip()))
+        indent = len(line) - len(line.lstrip(" "))
+
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+
+        if pending_key is not None and indent > pending_key[0]:
+            pending_indent, pending_parent, pending_name = pending_key
+            container: dict[str, Any] | list[Any]
+            if stripped.startswith("- "):
+                container = []
+            else:
+                container = {}
+            pending_parent[pending_name] = container
+            stack.append((pending_indent, container))
+            pending_key = None
+
+        parent = stack[-1][1]
+
+        if stripped.startswith("- "):
+            if isinstance(parent, list):
+                parent.append(_parse_scalar(stripped[2:].strip()))
             continue
 
         if ":" not in line:
-            active_list_key = None
+            pending_key = None
             continue
 
-        key, raw_value = line.split(":", 1)
+        key, raw_value = stripped.split(":", 1)
         key = key.strip()
         value = raw_value.strip()
 
-        if value == "":
-            metadata[key] = []
-            active_list_key = key
+        if not isinstance(parent, dict):
+            pending_key = None
             continue
 
-        metadata[key] = _parse_scalar(value)
-        active_list_key = None
+        if value == "":
+            parent[key] = {}
+            pending_key = (indent, parent, key)
+            continue
+
+        parent[key] = _parse_scalar(value)
+        pending_key = None
 
     return metadata
 
 
 def _parse_scalar(value: str) -> Any:
-    if value == "null":
+    normalized_value = value.lower()
+    if normalized_value == "null":
         return None
-    if value in {"true", "false"}:
-        return value == "true"
+    if normalized_value in {"true", "false"}:
+        return normalized_value == "true"
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
         return value[1:-1]
+    if re.match(r"^-?\d+$", value):
+        return int(value)
+    if re.match(r"^-?\d+\.\d+$", value):
+        return float(value)
     return value

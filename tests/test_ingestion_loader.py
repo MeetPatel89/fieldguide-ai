@@ -46,3 +46,46 @@ class MarkdownLoaderTest(unittest.TestCase):
             documents = load_markdown_documents(root)
 
         self.assertEqual([document.source_path.name for document in documents], ["a.md", "b.md"])
+
+    def test_loads_nested_frontmatter(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "incident.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "---",
+                        "doc_id: INC-1",
+                        "visibility: internal",
+                        "servicenow:",
+                        "  table: incident",
+                        "  number: INC000001",
+                        "  priority: 2",
+                        "  sla_breached: false",
+                        "  task_numbers:",
+                        "    - INCT0001001",
+                        "    - INCT0001002",
+                        "  visibility: customer_safe",
+                        "---",
+                        "",
+                        "# Incident",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            document = load_markdown_document(path)
+
+        self.assertEqual(document.metadata["visibility"], "internal")
+        self.assertEqual(
+            document.metadata["servicenow"],
+            {
+                "table": "incident",
+                "number": "INC000001",
+                "priority": 2,
+                "sla_breached": False,
+                "task_numbers": ["INCT0001001", "INCT0001002"],
+                "visibility": "customer_safe",
+            },
+        )
+        self.assertNotIn("table", document.metadata)
+        self.assertNotIn("number", document.metadata)

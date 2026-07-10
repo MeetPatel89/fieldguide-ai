@@ -162,6 +162,7 @@ def build_chunk_metadata(document: MarkdownDocument, section: MarkdownSection) -
         "related_records",
         "source_facts",
         "difficulty_tags",
+        "servicenow",
     ]
     metadata = {key: document.metadata.get(key) for key in keys if key in document.metadata}
     metadata["section_title"] = section.title

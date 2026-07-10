@@ -43,6 +43,7 @@ class MarkdownSectionChunkerTest(unittest.TestCase):
                 "service_id": "svc_api",
                 "owner_group": "Platform Engineering",
                 "related_records": ["KI-1"],
+                "servicenow": {"table": "kb_knowledge", "number": "KB0001"},
             },
             body="\n".join(
                 [
@@ -65,6 +66,7 @@ class MarkdownSectionChunkerTest(unittest.TestCase):
         self.assertEqual(chunks[0].metadata["service_id"], "svc_api")
         self.assertEqual(chunks[0].metadata["owner_group"], "Platform Engineering")
         self.assertEqual(chunks[0].metadata["related_records"], ["KI-1"])
+        self.assertEqual(chunks[0].metadata["servicenow"]["number"], "KB0001")
         self.assertEqual(chunks[0].metadata["section_title"], "Initial triage")
 
     def test_splits_large_sections_with_overlap(self) -> None:

@@ -5,6 +5,7 @@ description = "A forward-deployed RAG agent that turns scattered company knowled
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "chromadb>=1.5.9",
     "openai>=2.44.0",
     "python-dotenv>=1.0.0",
 ]
