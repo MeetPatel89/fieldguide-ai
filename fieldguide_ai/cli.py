@@ -8,10 +8,26 @@ from typing import TextIO
 from dotenv import load_dotenv
 
 from fieldguide_ai.demo import build_demo_messages, build_system_message
-from fieldguide_ai.ingestion import MarkdownSectionChunker, load_markdown_documents
+from fieldguide_ai.ingestion import (
+    DocumentIndexingPipeline,
+    IndexingResult,
+    MarkdownSectionChunker,
+    load_markdown_documents,
+)
 from fieldguide_ai.providers import LLMProvider, OpenAIProvider
+from fieldguide_ai.vectorstore import (
+    DEFAULT_COLLECTION_NAME,
+    DEFAULT_EMBEDDING_MODEL,
+    ChromaVectorStore,
+    EmbeddingProvider,
+    NumpyVectorStore,
+    OpenAIEmbeddingProvider,
+    VectorStore,
+)
 
 DEFAULT_MODEL = "gpt-5-nano"
+DEFAULT_CHROMA_PATH = "chroma_db"
+DEFAULT_NUMPY_PATH = "numpy_index.npz"
 EXIT_COMMANDS = {":exit", ":q", ":quit", "exit", "quit"}
 
 
@@ -20,6 +36,26 @@ def build_provider(model: str) -> OpenAIProvider:
         api_key=os.getenv("OPENAI_API_KEY"),
         model=model,
     )
+
+
+def build_vector_store(
+    provider_name: str,
+    embedding_provider: EmbeddingProvider,
+    path: str | None = None,
+    collection_name: str = DEFAULT_COLLECTION_NAME,
+) -> VectorStore:
+    if provider_name == "chroma":
+        return ChromaVectorStore(
+            path=path or DEFAULT_CHROMA_PATH,
+            collection_name=collection_name,
+            embedding_provider=embedding_provider,
+        )
+    if provider_name == "numpy":
+        return NumpyVectorStore(
+            path=path or DEFAULT_NUMPY_PATH,
+            embedding_provider=embedding_provider,
+        )
+    raise ValueError(f"unsupported vector store provider: {provider_name}")
 
 
 def run_demo(provider: LLMProvider, output_stream: TextIO = sys.stdout) -> None:
@@ -98,6 +134,23 @@ def preview_chunks(
             )
 
 
+def index_corpus(
+    corpus_path: str | Path,
+    vector_store: VectorStore,
+    max_words: int,
+    output_stream: TextIO = sys.stdout,
+) -> IndexingResult:
+    pipeline = DocumentIndexingPipeline(
+        vector_store=vector_store,
+        chunker=MarkdownSectionChunker(max_words=max_words),
+    )
+    result = pipeline.index_path(corpus_path)
+    output_stream.write(
+        f"Indexed {result.document_count} documents and {result.chunk_count} chunks.\n"
+    )
+    return result
+
+
 def _parse_bool(value: str) -> bool:
     if value.lower() in {"true", "1", "yes"}:
         return True
@@ -118,16 +171,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_MODEL,
         help=f"OpenAI model to use. Defaults to {DEFAULT_MODEL}.",
     )
-    parser.add_argument(
+    corpus_action = parser.add_mutually_exclusive_group()
+    corpus_action.add_argument(
         "--chunk-corpus",
         metavar="PATH",
         help="Preview markdown chunks for a corpus path without calling an LLM.",
+    )
+    corpus_action.add_argument(
+        "--index-corpus",
+        metavar="PATH",
+        help="Load, chunk, embed, and index a Markdown corpus.",
     )
     parser.add_argument(
         "--chunk-max-words",
         type=int,
         default=900,
-        help="Maximum words per preview chunk. Defaults to 900.",
+        help="Maximum words per chunk when previewing or indexing. Defaults to 900.",
     )
     parser.add_argument(
         "--chunk-limit",
@@ -144,6 +203,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="BOOL",
         help="Print full JSON for each chunk. Use alone or pass true/false.",
     )
+    parser.add_argument(
+        "--vector-store",
+        choices=("chroma", "numpy"),
+        default="chroma",
+        help="Vector store used by --index-corpus. Defaults to chroma.",
+    )
+    parser.add_argument(
+        "--store-path",
+        help="Storage directory for Chroma or .npz path for NumPy.",
+    )
+    parser.add_argument(
+        "--collection-name",
+        default=DEFAULT_COLLECTION_NAME,
+        help=f"Chroma collection name. Defaults to {DEFAULT_COLLECTION_NAME}.",
+    )
+    parser.add_argument(
+        "--embedding-model",
+        default=DEFAULT_EMBEDDING_MODEL,
+        help=f"OpenAI embedding model. Defaults to {DEFAULT_EMBEDDING_MODEL}.",
+    )
     return parser.parse_args(argv)
 
 
@@ -157,6 +236,24 @@ def main(argv: list[str] | None = None) -> None:
             max_words=args.chunk_max_words,
             limit=args.chunk_limit,
             details=args.chunk_details,
+        )
+        return
+
+    if args.index_corpus:
+        embedding_provider = OpenAIEmbeddingProvider(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model=args.embedding_model,
+        )
+        vector_store = build_vector_store(
+            provider_name=args.vector_store,
+            embedding_provider=embedding_provider,
+            path=args.store_path,
+            collection_name=args.collection_name,
+        )
+        index_corpus(
+            corpus_path=args.index_corpus,
+            vector_store=vector_store,
+            max_words=args.chunk_max_words,
         )
         return
 

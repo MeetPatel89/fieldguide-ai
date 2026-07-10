@@ -407,6 +407,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "chromadb" },
+    { name = "numpy" },
     { name = "openai" },
     { name = "python-dotenv" },
 ]
@@ -420,6 +421,7 @@ notebook = [
 requires-dist = [
     { name = "chromadb", specifier = ">=1.5.9" },
     { name = "ipykernel", marker = "extra == 'notebook'" },
+    { name = "numpy", specifier = ">=2.0.0" },
     { name = "openai", specifier = ">=2.44.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
 ]

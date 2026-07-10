@@ -2,11 +2,13 @@ from collections.abc import Sequence
 
 from openai import OpenAI
 
+from fieldguide_ai.vectorstore.base import EmbeddingProvider
+
 
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
 
-class OpenAIEmbeddingProvider:
+class OpenAIEmbeddingProvider(EmbeddingProvider):
     """Generate embeddings for text batches using the OpenAI embeddings API."""
 
     def __init__(
@@ -31,20 +33,3 @@ class OpenAIEmbeddingProvider:
             encoding_format="float",
         )
         return [list(item.embedding) for item in response.data]
-
-
-def main():
-    import os
-    from dotenv import load_dotenv
-    load_dotenv()
-
-    embedding_provider = OpenAIEmbeddingProvider(api_key=os.getenv("OPENAI_API_KEY"))
-    embeddings = embedding_provider.embed_texts(["Hello, world!"])
-    print("embeddings dimensions: ", len(embeddings[0]))
-    print("--------------------------------")
-    print(embeddings)
-    print("--------------------------------")
-
-
-if __name__ == "__main__":
-    main()

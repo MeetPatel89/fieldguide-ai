@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from fieldguide_ai.cli import preview_chunks, print_history, run_chat_loop
+from fieldguide_ai.cli import index_corpus, parse_args, preview_chunks, print_history, run_chat_loop
 from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers.base import LLMProvider
 
@@ -12,6 +12,17 @@ class FakeProvider(LLMProvider):
     def generate(self, messages: list[ChatMessage]) -> str:
         user_messages = [message.content for message in messages if message.role == "user"]
         return f"reply to {user_messages[-1]}"
+
+
+class FakeVectorStore:
+    def __init__(self) -> None:
+        self.replacements = []
+
+    def replace_chunks(self, chunks) -> None:
+        self.replacements.append(list(chunks))
+
+    def delete_documents(self, doc_ids) -> None:
+        pass
 
 
 class CliTest(unittest.TestCase):
@@ -82,3 +93,36 @@ class CliTest(unittest.TestCase):
         self.assertIn("Loaded 1 documents and created 1 chunks.", output)
         self.assertIn("DOC-1::chunk-0000 [runbook]", output)
         self.assertIn("Test Doc > Summary", output)
+
+    def test_index_corpus_reports_indexed_counts(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "doc.md").write_text("# Test\n\nBody", encoding="utf-8")
+            output_stream = io.StringIO()
+            store = FakeVectorStore()
+
+            result = index_corpus(
+                tmpdir,
+                vector_store=store,
+                max_words=900,
+                output_stream=output_stream,
+            )
+
+        self.assertEqual(result.document_count, 1)
+        self.assertEqual(result.chunk_count, 1)
+        self.assertEqual(output_stream.getvalue(), "Indexed 1 documents and 1 chunks.\n")
+
+    def test_parses_numpy_indexing_configuration(self) -> None:
+        args = parse_args(
+            [
+                "--index-corpus",
+                "docs",
+                "--vector-store",
+                "numpy",
+                "--store-path",
+                "custom.npz",
+            ]
+        )
+
+        self.assertEqual(args.index_corpus, "docs")
+        self.assertEqual(args.vector_store, "numpy")
+        self.assertEqual(args.store_path, "custom.npz")
