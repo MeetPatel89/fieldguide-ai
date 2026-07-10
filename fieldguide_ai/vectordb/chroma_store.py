@@ -45,6 +45,13 @@ class ChromaVectorStore:
     def get_collection(self) -> Collection:
         return self.collection
 
+    def query(self, query_text: str, n_results: int = 10) -> dict[str, Any]:
+        if self.embedding_provider is None:
+            raise ValueError("embedding_provider is required to query the collection")
+
+        query_embeddings = self.embedding_provider.embed_texts([query_text])
+        return self.collection.query(query_embeddings=query_embeddings, n_results=n_results)
+
 
 def serialize_chunk_metadata(chunk: DocumentChunk) -> dict[str, str | int | float | bool | None]:
     metadata: dict[str, str | int | float | bool | None] = {
@@ -96,3 +103,30 @@ def _json_ready(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
     return value
+
+
+def main():
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    embedding_provider = OpenAIEmbeddingProvider(api_key=os.getenv("OPENAI_API_KEY"))
+    client = chromadb.PersistentClient(path="chroma_db")
+    chroma_store = ChromaVectorStore(path="chroma_db", embedding_provider=embedding_provider, client=client)
+    query = "Several branch users cannot access Employee Portal after certificate rotation. Some coworkers can log in. What is the likely issue?"
+    results = chroma_store.query(query, n_results=10)
+    print("--------------------------------")
+    print("results: ", results)
+    print("--------------------------------")
+
+    # from fieldguide_ai.ingestion import MarkdownSectionChunker, load_markdown_documents
+    # chunks = MarkdownSectionChunker(max_words=1000).chunk_documents(load_markdown_documents("data/corpora/nautilus/raw"))
+    # chroma_store.index_chunks(chunks)
+
+    # print("--------------------------------")
+    # print("chunks indexed: ", len(chunks))
+    # print("--------------------------------")
+
+
+if __name__ == "__main__":
+    main()

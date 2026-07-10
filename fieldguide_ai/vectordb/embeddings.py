@@ -30,9 +30,6 @@ class OpenAIEmbeddingProvider:
             input=list(texts),
             encoding_format="float",
         )
-        print("--------------------------------")
-        print("response: ", response)
-        print("--------------------------------")
         return [list(item.embedding) for item in response.data]
 
 
