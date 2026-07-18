@@ -1,3 +1,6 @@
+"""Public LLM provider interfaces and registry helpers."""
+
+from fieldguide_ai.providers.anthropic_provider import AnthropicProvider
 from fieldguide_ai.providers.base import LLMProvider
 from fieldguide_ai.providers.openai_provider import OpenAIProvider
 from fieldguide_ai.providers.registry import (
@@ -8,6 +11,7 @@ from fieldguide_ai.providers.registry import (
 )
 
 __all__ = [
+    "AnthropicProvider",
     "LLMProvider",
     "OpenAIProvider",
     "PROVIDERS",

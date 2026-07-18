@@ -1,3 +1,5 @@
+"""Interactive chat wizard for Fieldguide AI."""
+
 import os
 import sys
 from typing import TextIO
@@ -12,7 +14,7 @@ from fieldguide_ai.cli import (
     index_corpus,
     run_chat_loop,
 )
-from fieldguide_ai.demo import build_system_message
+from fieldguide_ai.demo import build_system_prompt
 from fieldguide_ai.providers import PROVIDERS, ProviderSpec
 from fieldguide_ai.vectorstore import DEFAULT_COLLECTION_NAME, OpenAIEmbeddingProvider
 
@@ -20,14 +22,15 @@ OTHER_MODEL = "Other (type a model name)"
 DEFAULT_MAX_WORDS = 900
 
 
-class WizardCancelled(Exception):
-    """Raised internally when an interactive prompt is cancelled."""
+class WizardCancelledError(Exception):
+    """Raised internally when a wizard operation is cancelled."""
 
 
-def _ask(question):
+def _ask(question: questionary.Question) -> str:
+    """Ask a question and return the answer."""
     answer = question.ask()
     if answer is None:
-        raise WizardCancelled
+        raise WizardCancelledError("Wizard operation cancelled.")
     return answer
 
 
@@ -49,17 +52,33 @@ def run_wizard(
     input_stream: TextIO = sys.stdin,
     output_stream: TextIO = sys.stdout,
 ) -> None:
+    """Run the interactive chat wizard."""
     provider_choices, providers_by_label = _provider_choices()
     provider_label = _ask(
         questionary.select("Select an LLM provider:", choices=provider_choices)
     )
     provider_spec = providers_by_label[provider_label]
 
+    try:
+        available_models = provider_spec.available_models()
+    except Exception as error:
+        print(
+            f"Could not load current {provider_spec.label} models: {error}. "
+            "Using configured models.",
+            file=output_stream,
+        )
+        available_models = provider_spec.models
+
+    default_model = (
+        provider_spec.default_model
+        if provider_spec.default_model in available_models
+        else available_models[0]
+    )
     model = _ask(
         questionary.select(
             "Select a model:",
-            choices=[*provider_spec.models, OTHER_MODEL],
-            default=provider_spec.default_model,
+            choices=[*available_models, OTHER_MODEL],
+            default=default_model,
         )
     )
     if model == OTHER_MODEL:
@@ -91,7 +110,7 @@ def run_wizard(
     system_prompt = _ask(
         questionary.text(
             "System prompt:",
-            default=build_system_message().content,
+            default=build_system_prompt(),
         )
     )
     should_ingest = _ask(questionary.confirm("Run ingestion pipeline?", default=False))
@@ -133,11 +152,13 @@ def run_wizard(
 
 
 def main() -> None:
+    """Run main entry point for the interactive chat wizard."""
     load_dotenv()
     try:
         run_wizard()
-    except EOFError, KeyboardInterrupt, WizardCancelled:
-        return
+    except (EOFError, KeyboardInterrupt, WizardCancelledError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

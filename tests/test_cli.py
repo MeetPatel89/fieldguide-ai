@@ -10,16 +10,24 @@ from fieldguide_ai.cli import (
     print_history,
     run_chat_loop,
 )
+from fieldguide_ai.demo import build_system_prompt
+from fieldguide_ai.generation import GenerationResult
 from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers.base import LLMProvider
 
 
 class FakeProvider(LLMProvider):
-    def generate(self, messages: list[ChatMessage]) -> str:
+    def generate(self, messages: list[ChatMessage]) -> GenerationResult:
         user_messages = [
             message.content for message in messages if message.role == "user"
         ]
-        return f"reply to {user_messages[-1]}"
+        return self._record_generation(
+            GenerationResult(
+                text=f"reply to {user_messages[-1]}",
+                provider="fake",
+                model="fake-model",
+            )
+        )
 
 
 class FakeVectorStore:
@@ -41,9 +49,10 @@ class CliTest(unittest.TestCase):
 
         run_chat_loop(provider, input_stream=input_stream, output_stream=output_stream)
 
+        self.assertEqual(provider.system_prompt, build_system_prompt())
         self.assertEqual(
             [message.role for message in provider.get_history()],
-            ["system", "user", "assistant", "user", "assistant"],
+            ["user", "assistant", "user", "assistant"],
         )
         self.assertIn("Assistant> reply to First question", output_stream.getvalue())
         self.assertIn("Assistant> reply to Follow up", output_stream.getvalue())
@@ -55,8 +64,8 @@ class CliTest(unittest.TestCase):
 
         run_chat_loop(provider, input_stream=input_stream, output_stream=output_stream)
 
-        self.assertEqual(provider.get_history(), [provider.get_history()[0]])
-        self.assertEqual(provider.get_history()[0].role, "system")
+        self.assertEqual(provider.get_history(), [])
+        self.assertEqual(provider.system_prompt, build_system_prompt())
         self.assertIn("History cleared.", output_stream.getvalue())
 
     def test_chat_loop_reuses_custom_system_prompt_after_clear(self) -> None:
@@ -71,17 +80,16 @@ class CliTest(unittest.TestCase):
             system_prompt="Answer only from the field guide.",
         )
 
+        self.assertEqual(provider.get_history(), [])
         self.assertEqual(
-            provider.get_history(),
-            [ChatMessage(role="system", content="Answer only from the field guide.")],
+            provider.system_prompt,
+            "Answer only from the field guide.",
         )
 
-    def test_print_history_writes_numbered_messages(self) -> None:
+    def test_print_history_writes_system_then_turns(self) -> None:
         provider = FakeProvider(
-            message_history=[
-                ChatMessage(role="system", content="Rules"),
-                ChatMessage(role="user", content="Hello"),
-            ]
+            message_history=[ChatMessage(role="user", content="Hello")],
+            system_prompt="Rules",
         )
         output_stream = io.StringIO()
 

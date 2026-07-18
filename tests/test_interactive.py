@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from fieldguide_ai import interactive
+from fieldguide_ai.generation import GenerationResult
 from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers import OpenAIProvider, ProviderSpec, get_provider
 from fieldguide_ai.providers.base import LLMProvider
@@ -18,8 +19,17 @@ class Answer:
 
 
 class FakeProvider(LLMProvider):
-    def generate(self, messages: list[ChatMessage]) -> str:
-        return "response"
+    def list_models(self) -> list[str]:
+        return ["gpt-5-nano", "gpt-5-mini"]
+
+    def generate(self, messages: list[ChatMessage]) -> GenerationResult:
+        return self._record_generation(
+            GenerationResult(
+                text="response",
+                provider="fake",
+                model="fake-model",
+            )
+        )
 
 
 class ProviderRegistryTest(unittest.TestCase):
@@ -48,12 +58,14 @@ class InteractiveWizardTest(unittest.TestCase):
     def setUp(self) -> None:
         self.provider = FakeProvider()
         self.factory = Mock(return_value=self.provider)
+        self.model_loader = Mock(return_value=["gpt-5-mini", "gpt-5-nano"])
         self.provider_spec = ProviderSpec(
             name="openai",
             label="OpenAI",
             models=("gpt-5-nano", "gpt-5-mini"),
             default_model="gpt-5-nano",
             factory=self.factory,
+            model_loader=self.model_loader,
         )
 
     def test_wizard_maps_numpy_configuration_without_ingestion(self) -> None:
@@ -68,7 +80,7 @@ class InteractiveWizardTest(unittest.TestCase):
                 interactive.questionary,
                 "select",
                 side_effect=[Answer("OpenAI"), Answer("gpt-5-mini"), Answer("numpy")],
-            ),
+            ) as select,
             patch.object(
                 interactive.questionary,
                 "text",
@@ -93,6 +105,18 @@ class InteractiveWizardTest(unittest.TestCase):
         embedding_type.assert_not_called()
         build_vector_store.assert_not_called()
         index_corpus.assert_not_called()
+        self.model_loader.assert_called_once_with()
+        self.assertEqual(
+            select.call_args_list[1].kwargs,
+            {
+                "choices": [
+                    "gpt-5-mini",
+                    "gpt-5-nano",
+                    interactive.OTHER_MODEL,
+                ],
+                "default": "gpt-5-nano",
+            },
+        )
         self.factory.assert_called_once_with("gpt-5-mini")
         run_chat_loop.assert_called_once_with(
             self.provider,
@@ -165,14 +189,22 @@ class InteractiveWizardTest(unittest.TestCase):
             "Use indexed knowledge.",
         )
 
-    @patch.object(interactive, "run_wizard", side_effect=interactive.WizardCancelled)
+    @patch.object(
+        interactive,
+        "run_wizard",
+        side_effect=interactive.WizardCancelledError("Wizard operation cancelled."),
+    )
     @patch.object(interactive, "load_dotenv")
     def test_main_exits_cleanly_when_cancelled(
         self,
         load_dotenv: Mock,
         run_wizard: Mock,
     ) -> None:
-        interactive.main()
+        with (
+            patch.object(interactive.sys, "stderr"),
+            self.assertRaisesRegex(SystemExit, "1"),
+        ):
+            interactive.main()
 
         load_dotenv.assert_called_once_with()
         run_wizard.assert_called_once_with()

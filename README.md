@@ -70,7 +70,7 @@ Available chat commands:
 | Command | Effect |
 | --- | --- |
 | `:history` | Print the current system, user, and assistant messages. |
-| `:clear` | Clear conversation history and restore the configured system prompt. |
+| `:clear` | Clear conversation turn history; the configured system prompt is kept. |
 | `:quit`, `:q`, `:exit` | Exit the chat session. |
 
 Pressing Ctrl+C, Ctrl+D, or cancelling a wizard question exits cleanly.
@@ -163,7 +163,9 @@ User
 | --- | --- |
 | `fieldguide_ai/interactive.py` | Guided configuration, optional ingestion, and chat startup. |
 | `fieldguide_ai/cli.py` | Flag-based commands, indexing orchestration, and stateful chat loop. |
-| `fieldguide_ai/providers/` | Provider interface, OpenAI adapter, and provider registry. |
+| `fieldguide_ai/messages.py` | Canonical provider-agnostic `ChatMessage` conversation turns. |
+| `fieldguide_ai/generation.py` | Normalized `GenerationResult` plus token-usage metadata. |
+| `fieldguide_ai/providers/` | Provider interface, registry, adapters, and response extractors. |
 | `fieldguide_ai/ingestion/` | Markdown loading, frontmatter parsing, section chunking, and document replacement. |
 | `fieldguide_ai/vectorstore/` | Embedding abstraction plus Chroma and NumPy persistence/search. |
 | `langchain_pandas/` | Dataframe catalog and constrained inspection/query tools. |
@@ -183,11 +185,11 @@ Embedding is completed before persisted document records are replaced, reducing 
 
 ### Stateful chat
 
-1. Add the configured system prompt to provider history.
-2. Append each user message.
-3. Send the accumulated conversation to the provider.
-4. Append and display the assistant response.
-5. Allow the user to inspect or clear the history.
+1. Set the configured system prompt on the provider (separate from turn history).
+2. Append each user message to conversation history.
+3. Send the system prompt plus accumulated turns to the provider. OpenAI prepends system as an input item; Anthropic passes it as the top-level `system` argument.
+4. Normalize the provider payload into a `GenerationResult` (text plus metadata/raw), append text to history, and keep the result in an in-memory generation log.
+5. Allow the user to inspect or clear turn history; clearing keeps the system prompt and generation log.
 
 This describes observable state and tool flow; it does not expose hidden model reasoning.
 
@@ -218,6 +220,13 @@ Run lint and formatting checks without adding development dependencies to the pr
 ```bash
 UV_CACHE_DIR=/tmp/uv-cache UV_TOOL_DIR=/tmp/uv-tools uvx ruff check .
 UV_CACHE_DIR=/tmp/uv-cache UV_TOOL_DIR=/tmp/uv-tools uvx ruff format --check .
+```
+
+Install the development extras and run the static type checker:
+
+```bash
+uv sync --extra dev
+uv run pyright
 ```
 
 Tests cover message history, provider behavior, interactive configuration, Markdown parsing and chunking, indexing replacement, vector-store persistence/search, metadata serialization, and dataframe tools.
@@ -261,8 +270,10 @@ Do not interpret passing unit tests as evidence of answer quality or production 
 ├── .cursor/rules/          # Project rules, including README maintenance
 ├── fieldguide_ai/
 │   ├── ingestion/          # Markdown loading and chunking pipeline
-│   ├── providers/          # LLM abstractions and registry
+│   ├── providers/          # LLM abstractions, adapters, and registry
 │   ├── vectorstore/        # Chroma and NumPy vector stores
+│   ├── messages.py         # Canonical ChatMessage turns
+│   ├── generation.py       # GenerationResult and token usage
 │   ├── cli.py              # Flag-based CLI and chat loop
 │   └── interactive.py      # questionary wizard
 ├── langchain_pandas/       # Dataframe agent catalog and tools
@@ -274,7 +285,7 @@ Do not interpret passing unit tests as evidence of answer quality or production 
 
 ## Extension points
 
-- Register another LLM by adding a `ProviderSpec` in `fieldguide_ai/providers/registry.py` and implementing `LLMProvider`.
+- Register another LLM by adding a `ProviderSpec` in `fieldguide_ai/providers/registry.py`, implementing `LLMProvider`, owning request adapters, and returning a normalized `GenerationResult` (with optional raw metadata) from `generate`.
 - Add another vector backend by implementing the `VectorStore` interface and wiring it into CLI construction.
 - Add ingestion formats behind loaders that produce the existing document model.
 - Add safe dataframe operations as explicit tools rather than enabling arbitrary Python execution.

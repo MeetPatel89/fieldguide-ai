@@ -1,25 +1,14 @@
-from dataclasses import dataclass
-from typing import Any, Literal
+"""Canonical chat messages for Fieldguide AI."""
 
-Provider = Literal["openai"]
-Role = Literal["user", "assistant", "system"]
+from dataclasses import dataclass
+from typing import Literal
+
+Role = Literal["user", "assistant"]
 
 
 @dataclass(frozen=True)
 class ChatMessage:
-    """A message in a chat conversation."""
+    """A provider-agnostic conversation turn (user or assistant)."""
 
     role: Role
     content: str
-
-    def to_provider_message(self, provider: Provider) -> dict[str, Any]:
-        if provider == "openai":
-            return {
-                "role": self.role,
-                "content": self.content,
-            }
-        raise ValueError(f"Unsupported provider: {provider}")
-
-    def to_input_item(self) -> dict[str, Any]:
-        """Return the OpenAI input representation kept for backwards compatibility."""
-        return self.to_provider_message("openai")

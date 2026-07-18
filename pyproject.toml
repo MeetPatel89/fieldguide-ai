@@ -11,6 +11,7 @@ dependencies = [
     "numpy>=2.0.0",
     "openai>=2.44.0",
     "pandas>=3.0.3",
+    "pydantic>=2.13.4",
     "python-dotenv>=1.0.0",
     "questionary>=2.0",
     "tabulate>=0.10.0",
@@ -21,6 +22,10 @@ fieldguide = "fieldguide_ai.interactive:main"
 
 [project.optional-dependencies]
 notebook = ["ipykernel"]
+dev = [
+    "pyright>=1.1.400",
+    "ruff>=0.12.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.28,<0.12"]
@@ -29,3 +34,44 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "fieldguide_ai"
 module-root = ""
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+
+[tool.ruff.lint]
+preview = true
+select = [
+    "E",
+    "F",
+    "I",
+    "PTH",
+    "N",
+    "D",
+    "C4",
+    "ANN"
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.pyright]
+include = [
+    "fieldguide_ai/generation.py",
+    "fieldguide_ai/messages.py",
+    "fieldguide_ai/providers",
+]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
+venv = ".venv"
+venvPath = "."
+strict = [
+    "fieldguide_ai/generation.py",
+    "fieldguide_ai/messages.py",
+    "fieldguide_ai/providers/base.py",
+]

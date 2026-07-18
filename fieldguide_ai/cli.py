@@ -7,14 +7,13 @@ from typing import TextIO
 
 from dotenv import load_dotenv
 
-from fieldguide_ai.demo import build_demo_messages, build_system_message
+from fieldguide_ai.demo import build_demo_messages, build_system_prompt
 from fieldguide_ai.ingestion import (
     DocumentIndexingPipeline,
     IndexingResult,
     MarkdownSectionChunker,
     load_markdown_documents,
 )
-from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers import (
     LLMProvider,
     OpenAIProvider,
@@ -65,8 +64,9 @@ def build_vector_store(
 
 
 def run_demo(provider: LLMProvider, output_stream: TextIO = sys.stdout) -> None:
-    response_text = provider.generate(build_demo_messages())
-    output_stream.write(f"{response_text}\n")
+    provider.system_prompt = build_system_prompt()
+    result = provider.generate(build_demo_messages())
+    output_stream.write(f"{result.text}\n")
 
 
 def run_chat_loop(
@@ -75,12 +75,9 @@ def run_chat_loop(
     output_stream: TextIO = sys.stdout,
     system_prompt: str | None = None,
 ) -> None:
-    system_message = (
-        build_system_message()
-        if system_prompt is None
-        else ChatMessage(role="system", content=system_prompt)
+    provider.system_prompt = (
+        build_system_prompt() if system_prompt is None else system_prompt
     )
-    provider.add_message(system_message)
     output_stream.write(
         "Stateful chat started. Type :quit to exit, :history to inspect state.\n"
     )
@@ -109,7 +106,6 @@ def run_chat_loop(
 
         if command == ":clear":
             provider.clear_history()
-            provider.add_message(system_message)
             output_stream.write("History cleared.\n")
             continue
 
@@ -118,8 +114,13 @@ def run_chat_loop(
 
 
 def print_history(provider: LLMProvider, output_stream: TextIO = sys.stdout) -> None:
-    for index, message in enumerate(provider.get_history(), start=1):
+    index = 1
+    if provider.system_prompt is not None:
+        output_stream.write(f"{index}. system: {provider.system_prompt}\n")
+        index += 1
+    for message in provider.get_history():
         output_stream.write(f"{index}. {message.role}: {message.content}\n")
+        index += 1
 
 
 def preview_chunks(
