@@ -17,3 +17,6 @@ notebooks/
 
 # data
 data/
+
+# vectordb
+vectordb/

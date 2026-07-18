@@ -14,7 +14,13 @@ from fieldguide_ai.ingestion import (
     MarkdownSectionChunker,
     load_markdown_documents,
 )
-from fieldguide_ai.providers import LLMProvider, OpenAIProvider
+from fieldguide_ai.messages import ChatMessage
+from fieldguide_ai.providers import (
+    LLMProvider,
+    OpenAIProvider,
+    build_provider as build_registered_provider,
+    get_provider,
+)
 from fieldguide_ai.vectorstore import (
     DEFAULT_COLLECTION_NAME,
     DEFAULT_EMBEDDING_MODEL,
@@ -25,17 +31,17 @@ from fieldguide_ai.vectorstore import (
     VectorStore,
 )
 
-DEFAULT_MODEL = "gpt-5-nano"
+DEFAULT_MODEL = get_provider("openai").default_model
 DEFAULT_CHROMA_PATH = "chroma_db"
 DEFAULT_NUMPY_PATH = "numpy_index.npz"
 EXIT_COMMANDS = {":exit", ":q", ":quit", "exit", "quit"}
 
 
 def build_provider(model: str) -> OpenAIProvider:
-    return OpenAIProvider(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model=model,
-    )
+    provider = build_registered_provider("openai", model)
+    if not isinstance(provider, OpenAIProvider):
+        raise TypeError("the openai registry entry did not create an OpenAIProvider")
+    return provider
 
 
 def build_vector_store(
@@ -67,9 +73,17 @@ def run_chat_loop(
     provider: LLMProvider,
     input_stream: TextIO = sys.stdin,
     output_stream: TextIO = sys.stdout,
+    system_prompt: str | None = None,
 ) -> None:
-    provider.add_message(build_system_message())
-    output_stream.write("Stateful chat started. Type :quit to exit, :history to inspect state.\n")
+    system_message = (
+        build_system_message()
+        if system_prompt is None
+        else ChatMessage(role="system", content=system_prompt)
+    )
+    provider.add_message(system_message)
+    output_stream.write(
+        "Stateful chat started. Type :quit to exit, :history to inspect state.\n"
+    )
 
     while True:
         output_stream.write("\nYou> ")
@@ -95,7 +109,7 @@ def run_chat_loop(
 
         if command == ":clear":
             provider.clear_history()
-            provider.add_message(build_system_message())
+            provider.add_message(system_message)
             output_stream.write("History cleared.\n")
             continue
 
@@ -119,7 +133,9 @@ def preview_chunks(
     chunker = MarkdownSectionChunker(max_words=max_words)
     chunks = chunker.chunk_documents(documents)
 
-    output_stream.write(f"Loaded {len(documents)} documents and created {len(chunks)} chunks.\n")
+    output_stream.write(
+        f"Loaded {len(documents)} documents and created {len(chunks)} chunks.\n"
+    )
     for chunk in chunks[:limit]:
         section = " > ".join(chunk.section_path)
         doc_type = chunk.metadata.get("doc_type", "unknown")
@@ -160,7 +176,9 @@ def _parse_bool(value: str) -> bool:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fieldguide AI command-line interface.")
+    parser = argparse.ArgumentParser(
+        description="Fieldguide AI command-line interface."
+    )
     parser.add_argument(
         "--demo",
         action="store_true",

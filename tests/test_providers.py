@@ -1,7 +1,9 @@
 import unittest
+from unittest.mock import Mock, patch
 
 from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers.base import LLMProvider
+from fieldguide_ai.providers.openai_provider import OpenAIProvider
 
 
 class FakeProvider(LLMProvider):
@@ -68,16 +70,38 @@ class ProviderHistoryTest(unittest.TestCase):
         )
 
     def test_clear_history_removes_existing_messages(self) -> None:
-        provider = FakeProvider(message_history=[ChatMessage(role="user", content="Hello")])
+        provider = FakeProvider(
+            message_history=[ChatMessage(role="user", content="Hello")]
+        )
 
         provider.clear_history()
 
         self.assertEqual(provider.get_history(), [])
 
     def test_get_history_returns_a_copy(self) -> None:
-        provider = FakeProvider(message_history=[ChatMessage(role="user", content="Hello")])
+        provider = FakeProvider(
+            message_history=[ChatMessage(role="user", content="Hello")]
+        )
 
         history = provider.get_history()
         history.append(ChatMessage(role="assistant", content="Mutated externally"))
 
-        self.assertEqual(provider.get_history(), [ChatMessage(role="user", content="Hello")])
+        self.assertEqual(
+            provider.get_history(), [ChatMessage(role="user", content="Hello")]
+        )
+
+
+class OpenAIProviderTest(unittest.TestCase):
+    @patch("fieldguide_ai.providers.openai_provider.OpenAI")
+    def test_generate_returns_response_text(self, openai_type: Mock) -> None:
+        response = Mock(output_text="Generated response")
+        openai_type.return_value.responses.create.return_value = response
+        provider = OpenAIProvider(api_key="test-key", model="test-model")
+
+        result = provider.generate([ChatMessage(role="user", content="Hello")])
+
+        self.assertEqual(result, "Generated response")
+        openai_type.return_value.responses.create.assert_called_once_with(
+            model="test-model",
+            input=[{"role": "user", "content": "Hello"}],
+        )

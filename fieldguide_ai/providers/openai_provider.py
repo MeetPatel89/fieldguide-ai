@@ -21,6 +21,31 @@ class OpenAIProvider(LLMProvider):
     def generate(self, messages: list[ChatMessage]) -> str:
         response = self.client.responses.create(
             model=self.model,
-            input=[message.to_input_item() for message in messages],
+            input=[message.to_provider_message("openai") for message in messages],
         )
         return response.output_text
+
+
+def main() -> None:
+    import os
+
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    provider = OpenAIProvider(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model="gpt-4o-mini",
+    )
+    response_text = provider.generate(
+        [
+            ChatMessage(
+                role="user",
+                content="Write a motivational message for learners studying AI development.",
+            )
+        ]
+    )
+    print(response_text)
+
+
+if __name__ == "__main__":
+    main()

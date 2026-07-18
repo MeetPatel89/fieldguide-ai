@@ -3,14 +3,22 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from fieldguide_ai.cli import index_corpus, parse_args, preview_chunks, print_history, run_chat_loop
+from fieldguide_ai.cli import (
+    index_corpus,
+    parse_args,
+    preview_chunks,
+    print_history,
+    run_chat_loop,
+)
 from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers.base import LLMProvider
 
 
 class FakeProvider(LLMProvider):
     def generate(self, messages: list[ChatMessage]) -> str:
-        user_messages = [message.content for message in messages if message.role == "user"]
+        user_messages = [
+            message.content for message in messages if message.role == "user"
+        ]
         return f"reply to {user_messages[-1]}"
 
 
@@ -50,6 +58,23 @@ class CliTest(unittest.TestCase):
         self.assertEqual(provider.get_history(), [provider.get_history()[0]])
         self.assertEqual(provider.get_history()[0].role, "system")
         self.assertIn("History cleared.", output_stream.getvalue())
+
+    def test_chat_loop_reuses_custom_system_prompt_after_clear(self) -> None:
+        provider = FakeProvider()
+        input_stream = io.StringIO("Question\n:clear\n:quit\n")
+        output_stream = io.StringIO()
+
+        run_chat_loop(
+            provider,
+            input_stream=input_stream,
+            output_stream=output_stream,
+            system_prompt="Answer only from the field guide.",
+        )
+
+        self.assertEqual(
+            provider.get_history(),
+            [ChatMessage(role="system", content="Answer only from the field guide.")],
+        )
 
     def test_print_history_writes_numbered_messages(self) -> None:
         provider = FakeProvider(
@@ -109,7 +134,9 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(result.document_count, 1)
         self.assertEqual(result.chunk_count, 1)
-        self.assertEqual(output_stream.getvalue(), "Indexed 1 documents and 1 chunks.\n")
+        self.assertEqual(
+            output_stream.getvalue(), "Indexed 1 documents and 1 chunks.\n"
+        )
 
     def test_parses_numpy_indexing_configuration(self) -> None:
         args = parse_args(
