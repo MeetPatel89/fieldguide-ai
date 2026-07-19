@@ -1,3 +1,5 @@
+"""Command-line interface for Fieldguide AI."""
+
 import argparse
 import json
 import os
@@ -17,8 +19,10 @@ from fieldguide_ai.ingestion import (
 from fieldguide_ai.providers import (
     LLMProvider,
     OpenAIProvider,
-    build_provider as build_registered_provider,
     get_provider,
+)
+from fieldguide_ai.providers import (
+    build_provider as build_registered_provider,
 )
 from fieldguide_ai.vectorstore import (
     DEFAULT_COLLECTION_NAME,
@@ -37,6 +41,7 @@ EXIT_COMMANDS = {":exit", ":q", ":quit", "exit", "quit"}
 
 
 def build_provider(model: str) -> OpenAIProvider:
+    """Build the registered OpenAI provider for a model."""
     provider = build_registered_provider("openai", model)
     if not isinstance(provider, OpenAIProvider):
         raise TypeError("the openai registry entry did not create an OpenAIProvider")
@@ -49,6 +54,7 @@ def build_vector_store(
     path: str | None = None,
     collection_name: str = DEFAULT_COLLECTION_NAME,
 ) -> VectorStore:
+    """Build the requested vector-store implementation."""
     if provider_name == "chroma":
         return ChromaVectorStore(
             path=path or DEFAULT_CHROMA_PATH,
@@ -64,6 +70,7 @@ def build_vector_store(
 
 
 def run_demo(provider: LLMProvider, output_stream: TextIO = sys.stdout) -> None:
+    """Run the stateless demonstration prompt."""
     provider.system_prompt = build_system_prompt()
     result = provider.generate(build_demo_messages())
     output_stream.write(f"{result.text}\n")
@@ -75,6 +82,7 @@ def run_chat_loop(
     output_stream: TextIO = sys.stdout,
     system_prompt: str | None = None,
 ) -> None:
+    """Run an interactive, stateful chat session."""
     provider.system_prompt = (
         build_system_prompt() if system_prompt is None else system_prompt
     )
@@ -114,6 +122,7 @@ def run_chat_loop(
 
 
 def print_history(provider: LLMProvider, output_stream: TextIO = sys.stdout) -> None:
+    """Write the provider's conversation history to a stream."""
     index = 1
     if provider.system_prompt is not None:
         output_stream.write(f"{index}. system: {provider.system_prompt}\n")
@@ -130,6 +139,7 @@ def preview_chunks(
     output_stream: TextIO = sys.stdout,
     details: bool = False,
 ) -> None:
+    """Load a corpus and write a preview of its chunks."""
     documents = load_markdown_documents(corpus_path)
     chunker = MarkdownSectionChunker(max_words=max_words)
     chunks = chunker.chunk_documents(documents)
@@ -157,6 +167,7 @@ def index_corpus(
     max_words: int,
     output_stream: TextIO = sys.stdout,
 ) -> IndexingResult:
+    """Load and index a Markdown corpus in a vector store."""
     pipeline = DocumentIndexingPipeline(
         vector_store=vector_store,
         chunker=MarkdownSectionChunker(max_words=max_words),
@@ -177,6 +188,7 @@ def _parse_bool(value: str) -> bool:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description="Fieldguide AI command-line interface."
     )
@@ -246,6 +258,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Run the Fieldguide command-line interface."""
     load_dotenv()
     args = parse_args(argv)
 

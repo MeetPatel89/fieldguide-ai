@@ -1,3 +1,5 @@
+"""Validated catalog of named pandas dataframes."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +10,8 @@ import pandas as pd
 
 @dataclass(frozen=True)
 class DatasetSpec:
+    """User-supplied definition of a named dataset."""
+
     name: str
     dataframe: pd.DataFrame
     description: str = ""
@@ -16,6 +20,8 @@ class DatasetSpec:
 
 @dataclass(frozen=True)
 class DatasetEntry:
+    """Validated dataset entry stored in a dataframe catalog."""
+
     name: str
     dataframe: pd.DataFrame
     description: str
@@ -24,18 +30,22 @@ class DatasetEntry:
 
     @property
     def source_name(self) -> str:
+        """Basename of the dataset source path."""
         if not self.source_path:
             return ""
         return Path(self.source_path).name
 
 
 class DataframeCatalog:
+    """Provide validated, name-based access to dataframes."""
+
     def __init__(self, entries: list[DatasetEntry]) -> None:
         self._entries = entries
         self._by_name = {entry.name: entry for entry in entries}
 
     @classmethod
     def from_specs(cls, specs: list[DatasetSpec]) -> "DataframeCatalog":
+        """Validate dataset specifications and build a catalog."""
         entries: list[DatasetEntry] = []
         seen_names: set[str] = set()
         for spec in specs:
@@ -62,9 +72,11 @@ class DataframeCatalog:
         return cls(entries)
 
     def all(self) -> list[DatasetEntry]:
+        """Return all catalog entries in insertion order."""
         return list(self._entries)
 
     def get(self, dataset_name: str) -> DatasetEntry:
+        """Return a dataset entry by name."""
         try:
             return self._by_name[dataset_name]
         except KeyError as exc:
@@ -74,14 +86,14 @@ class DataframeCatalog:
             ) from exc
 
     def names(self) -> list[str]:
+        """Return dataset names in insertion order."""
         return [entry.name for entry in self._entries]
 
 
 def infer_id_column(dataframe: pd.DataFrame) -> str | None:
+    """Infer a likely identifier column from a dataframe."""
     candidates = [
-        column
-        for column in dataframe.columns
-        if "id" in str(column).strip().lower()
+        column for column in dataframe.columns if "id" in str(column).strip().lower()
     ]
     for column in candidates:
         series = dataframe[column]

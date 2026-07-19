@@ -1,3 +1,9 @@
+"""
+Loader for markdown documents.
+
+This module provides functions to load markdown documents and parse their frontmatter.
+"""
+
 import re
 from pathlib import Path
 from typing import Any, Iterable
@@ -8,18 +14,61 @@ FRONTMATTER_BOUNDARY = "---"
 
 
 def load_markdown_document(path: str | Path) -> MarkdownDocument:
+    """
+    Load a markdown document from a file.
+
+    Parameters
+    ----------
+    path : str or Path
+        The path to the markdown document.
+
+    Returns
+    -------
+    document : MarkdownDocument
+        The loaded markdown document.
+    """
     source_path = Path(path)
     raw_text = source_path.read_text(encoding="utf-8")
     metadata, body = parse_markdown_frontmatter(raw_text)
-    return MarkdownDocument(source_path=source_path, body=body.strip(), metadata=metadata)
+    return MarkdownDocument(
+        source_path=source_path, body=body.strip(), metadata=metadata
+    )
 
 
 def load_markdown_documents(root: str | Path) -> list[MarkdownDocument]:
+    """
+    Load all markdown documents from a directory.
+
+    Parameters
+    ----------
+    root : str or Path
+        The path to the root directory.
+
+    Returns
+    -------
+    documents : list[MarkdownDocument]
+        The loaded markdown documents.
+    """
     root_path = Path(root)
     return [load_markdown_document(path) for path in sorted(root_path.rglob("*.md"))]
 
 
 def parse_markdown_frontmatter(raw_text: str) -> tuple[dict[str, Any], str]:
+    """
+    Parse the frontmatter of a markdown document.
+
+    Parameters
+    ----------
+    raw_text : str
+        The raw text of the markdown document.
+
+    Returns
+    -------
+    metadata : dict[str, Any]
+        The metadata of the markdown document.
+    body : str
+        The body of the markdown document.
+    """
     lines = raw_text.splitlines()
     if not lines or lines[0].strip() != FRONTMATTER_BOUNDARY:
         return {}, raw_text
@@ -97,7 +146,7 @@ def _parse_simple_yaml(lines: Iterable[str]) -> dict[str, Any]:
     return metadata
 
 
-def _parse_scalar(value: str) -> Any:
+def _parse_scalar(value: str) -> object:
     normalized_value = value.lower()
     if normalized_value == "null":
         return None
@@ -110,3 +159,14 @@ def _parse_scalar(value: str) -> Any:
     if re.match(r"^-?\d+\.\d+$", value):
         return float(value)
     return value
+
+
+if __name__ == "__main__":
+    file_path = f"{Path(__file__).parent.parent.parent}/data/corpora/nautilus/raw/"
+    documents = load_markdown_documents(file_path)
+    for document in documents:
+        print("--------------------------------")
+        print(f"Document ID: {document.doc_id}")
+        print(f"Document Title: {document.title}")
+        print(document)
+        print("--------------------------------")

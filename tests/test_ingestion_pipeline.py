@@ -1,10 +1,11 @@
+import unittest
+from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from fieldguide_ai.ingestion import DocumentIndexingPipeline
-from fieldguide_ai.ingestion.models import MarkdownDocument
-from fieldguide_ai.vectorstore import VectorStore
+from fieldguide_ai.ingestion.models import DocumentChunk, MarkdownDocument
+from fieldguide_ai.vectorstore import VectorSearchResult, VectorStore
 
 
 class RecordingVectorStore(VectorStore):
@@ -12,16 +13,16 @@ class RecordingVectorStore(VectorStore):
         self.replacements = []
         self.deletions = []
 
-    def index_chunks(self, chunks) -> None:
+    def index_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
         raise AssertionError("pipeline must use document replacement")
 
-    def replace_chunks(self, chunks) -> None:
+    def replace_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
         self.replacements.append(list(chunks))
 
-    def delete_documents(self, doc_ids) -> None:
+    def delete_documents(self, doc_ids: Sequence[str]) -> None:
         self.deletions.append(list(doc_ids))
 
-    def query(self, query_text, n_results=10):
+    def query(self, query_text: str, n_results: int = 10) -> list[VectorSearchResult]:
         return []
 
 

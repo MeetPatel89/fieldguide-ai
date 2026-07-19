@@ -1,3 +1,5 @@
+"""Chroma-backed vector-store implementation."""
+
 from collections.abc import Sequence
 
 import chromadb
@@ -31,12 +33,14 @@ class ChromaVectorStore(VectorStore):
         self.collection = self.client.get_or_create_collection(name=collection_name)
 
     def index_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
+        """Insert or update chunks by chunk ID."""
         if not chunks:
             return
         embeddings = self._embed_chunks(chunks)
         self._upsert(chunks, embeddings)
 
     def replace_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
+        """Replace all indexed chunks for the supplied documents."""
         if not chunks:
             return
 
@@ -46,13 +50,16 @@ class ChromaVectorStore(VectorStore):
         self._upsert(chunks, embeddings)
 
     def delete_documents(self, doc_ids: Sequence[str]) -> None:
+        """Delete every chunk belonging to the supplied document IDs."""
         for doc_id in dict.fromkeys(doc_ids):
             self.collection.delete(where={"doc_id": doc_id})
 
     def get_collection(self) -> Collection:
+        """Return the underlying Chroma collection."""
         return self.collection
 
     def query(self, query_text: str, n_results: int = 10) -> list[VectorSearchResult]:
+        """Return the nearest indexed chunks in nearest-first order."""
         if n_results <= 0:
             raise ValueError("n_results must be greater than zero")
 
@@ -79,7 +86,9 @@ class ChromaVectorStore(VectorStore):
         ]
 
     def _embed_chunks(self, chunks: Sequence[DocumentChunk]) -> list[list[float]]:
-        embeddings = self.embedding_provider.embed_texts([chunk.content for chunk in chunks])
+        embeddings = self.embedding_provider.embed_texts(
+            [chunk.content for chunk in chunks]
+        )
         validate_embeddings(embeddings, len(chunks))
         return embeddings
 

@@ -31,6 +31,9 @@ class FakeProvider(LLMProvider):
         self.last_messages: list[ChatMessage] | None = None
         self.last_system_prompt: str | None = None
 
+    def list_models(self) -> list[str]:
+        return ["fake-model"]
+
     def generate(self, messages: list[ChatMessage]) -> GenerationResult:
         self.last_messages = list(messages)
         self.last_system_prompt = self.system_prompt

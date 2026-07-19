@@ -1,9 +1,10 @@
+"""Embedding providers for vector-store implementations."""
+
 from collections.abc import Sequence
 
 from openai import OpenAI
 
 from fieldguide_ai.vectorstore.base import EmbeddingProvider
-
 
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
@@ -24,6 +25,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         self.client = client or OpenAI(api_key=api_key)
 
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        """Embed a batch of texts in input order."""
         if not texts:
             return []
 

@@ -1,7 +1,8 @@
 import io
+import unittest
+from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from fieldguide_ai.cli import (
     index_corpus,
@@ -12,11 +13,15 @@ from fieldguide_ai.cli import (
 )
 from fieldguide_ai.demo import build_system_prompt
 from fieldguide_ai.generation import GenerationResult
+from fieldguide_ai.ingestion.models import DocumentChunk
 from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers.base import LLMProvider
 
 
 class FakeProvider(LLMProvider):
+    def list_models(self) -> list[str]:
+        return ["fake-model"]
+
     def generate(self, messages: list[ChatMessage]) -> GenerationResult:
         user_messages = [
             message.content for message in messages if message.role == "user"
@@ -34,10 +39,10 @@ class FakeVectorStore:
     def __init__(self) -> None:
         self.replacements = []
 
-    def replace_chunks(self, chunks) -> None:
+    def replace_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
         self.replacements.append(list(chunks))
 
-    def delete_documents(self, doc_ids) -> None:
+    def delete_documents(self, doc_ids: Sequence[str]) -> None:
         pass
 
 

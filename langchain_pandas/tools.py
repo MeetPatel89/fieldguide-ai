@@ -1,3 +1,5 @@
+"""LangChain tools for safe dataframe inspection and querying."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -15,6 +17,8 @@ MAX_PREVIEW_ROWS = 20
 
 
 class FilterCondition(BaseModel):
+    """A validated dataframe filter condition."""
+
     column: str = Field(description="The dataframe column to inspect.")
     operator: Literal["eq", "ne", "gt", "gte", "lt", "lte", "contains", "in"] = Field(
         description="The comparison operator to apply."
@@ -25,15 +29,21 @@ class FilterCondition(BaseModel):
 
 
 class DescribeDataframeInput(BaseModel):
+    """Input for the dataframe-description tool."""
+
     dataset_name: str = Field(description="The dataset to describe.")
 
 
 class PreviewDataframeInput(BaseModel):
+    """Input for the dataframe-preview tool."""
+
     dataset_name: str = Field(description="The dataset to preview.")
     limit: int = Field(default=5, ge=1, le=MAX_PREVIEW_ROWS)
 
 
 class SearchRowsInput(BaseModel):
+    """Input for the cross-dataframe row-search tool."""
+
     query: str = Field(description="The case-insensitive text query to search for.")
     dataset_name: str | None = Field(
         default=None,
@@ -43,6 +53,8 @@ class SearchRowsInput(BaseModel):
 
 
 class FilterRowsInput(BaseModel):
+    """Input for the dataframe row-filtering tool."""
+
     dataset_name: str = Field(description="The dataset to filter.")
     conditions: list[FilterCondition] = Field(
         default_factory=list,
@@ -61,6 +73,8 @@ class FilterRowsInput(BaseModel):
 
 
 class AggregateRowsInput(BaseModel):
+    """Input for the dataframe aggregation tool."""
+
     dataset_name: str = Field(description="The dataset to aggregate.")
     group_by: list[str] | None = Field(
         default=None,
@@ -81,12 +95,16 @@ class AggregateRowsInput(BaseModel):
 
 
 class DistinctValuesInput(BaseModel):
+    """Input for the distinct-value counting tool."""
+
     dataset_name: str = Field(description="The dataset to inspect.")
     column: str = Field(description="The column whose values should be counted.")
     limit: int = Field(default=20, ge=1, le=MAX_DISTINCT_VALUES)
 
 
-def build_tools(catalog: DataframeCatalog) -> list:
+def build_tools(catalog: DataframeCatalog) -> list[object]:
+    """Build dataframe-query tools bound to a catalog."""
+
     @tool
     def list_dataframes() -> str:
         """List all available datasets with source and shape metadata."""
@@ -155,7 +173,9 @@ def build_tools(catalog: DataframeCatalog) -> list:
             if not searchable:
                 continue
             for _, row in entry.dataframe.iterrows():
-                values = [str(row[column]) for column in searchable if pd.notna(row[column])]
+                values = [
+                    str(row[column]) for column in searchable if pd.notna(row[column])
+                ]
                 haystack = " ".join(values)
                 lowered = haystack.lower()
                 if normalized_query.lower() not in lowered and not all(

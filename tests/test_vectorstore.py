@@ -1,6 +1,7 @@
+import unittest
+from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import Mock
 
 from fieldguide_ai.ingestion.models import DocumentChunk
@@ -18,7 +19,7 @@ class FakeEmbeddingProvider(EmbeddingProvider):
         self.embeddings = embeddings
         self.calls: list[list[str]] = []
 
-    def embed_texts(self, texts):
+    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         self.calls.append(list(texts))
         return [self.embeddings[text] for text in texts]
 
@@ -54,7 +55,9 @@ class OpenAIEmbeddingProviderTest(unittest.TestCase):
             api_key="test-key", model="text-embedding-3-large", client=client
         )
 
-        self.assertEqual(provider.embed_texts(["first", "second"]), [[0.1, 0.2], [0.3, 0.4]])
+        self.assertEqual(
+            provider.embed_texts(["first", "second"]), [[0.1, 0.2], [0.3, 0.4]]
+        )
         client.embeddings.create.assert_called_once_with(
             model="text-embedding-3-large",
             input=["first", "second"],
@@ -85,7 +88,9 @@ class ChromaVectorStoreTest(unittest.TestCase):
 
     def test_creates_or_reuses_named_collection(self) -> None:
         self.assertIs(self.store.get_collection(), self.collection)
-        self.client.get_or_create_collection.assert_called_once_with(name="knowledge-base")
+        self.client.get_or_create_collection.assert_called_once_with(
+            name="knowledge-base"
+        )
 
     def test_indexes_and_replaces_document_chunks(self) -> None:
         chunk = make_chunk("DOC-1::chunk-0000", "DOC-1", "First chunk")
@@ -135,7 +140,12 @@ class ChromaVectorStoreTest(unittest.TestCase):
 class NumpyVectorStoreTest(unittest.TestCase):
     def test_cosine_query_is_nearest_first_with_stable_ties(self) -> None:
         provider = FakeEmbeddingProvider(
-            {"alpha": [1.0, 0.0], "beta": [0.0, 1.0], "same": [1.0, 0.0], "q": [1.0, 0.0]}
+            {
+                "alpha": [1.0, 0.0],
+                "beta": [0.0, 1.0],
+                "same": [1.0, 0.0],
+                "q": [1.0, 0.0],
+            }
         )
         store = NumpyVectorStore(provider)
         store.index_chunks(
@@ -154,7 +164,12 @@ class NumpyVectorStoreTest(unittest.TestCase):
 
     def test_replace_removes_stale_document_chunks(self) -> None:
         provider = FakeEmbeddingProvider(
-            {"old zero": [1.0, 0.0], "old one": [0.0, 1.0], "new": [1.0, 1.0], "q": [1.0, 1.0]}
+            {
+                "old zero": [1.0, 0.0],
+                "old one": [0.0, 1.0],
+                "new": [1.0, 1.0],
+                "q": [1.0, 1.0],
+            }
         )
         store = NumpyVectorStore(provider)
         store.index_chunks(

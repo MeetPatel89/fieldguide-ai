@@ -1,8 +1,11 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
-from fieldguide_ai.ingestion.loader import load_markdown_document, load_markdown_documents
+from fieldguide_ai.ingestion.loader import (
+    load_markdown_document,
+    load_markdown_documents,
+)
 
 
 class MarkdownLoaderTest(unittest.TestCase):
@@ -45,7 +48,9 @@ class MarkdownLoaderTest(unittest.TestCase):
 
             documents = load_markdown_documents(root)
 
-        self.assertEqual([document.source_path.name for document in documents], ["a.md", "b.md"])
+        self.assertEqual(
+            [document.source_path.name for document in documents], ["a.md", "b.md"]
+        )
 
     def test_loads_nested_frontmatter(self) -> None:
         with TemporaryDirectory() as tmpdir:

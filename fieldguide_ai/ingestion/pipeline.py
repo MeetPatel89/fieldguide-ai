@@ -1,3 +1,5 @@
+"""Pipeline for loading, chunking, and indexing Markdown documents."""
+
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +12,8 @@ from fieldguide_ai.vectorstore.base import VectorStore
 
 @dataclass(frozen=True)
 class IndexingResult:
+    """Counts produced by an indexing operation."""
+
     document_count: int
     chunk_count: int
 
@@ -26,9 +30,11 @@ class DocumentIndexingPipeline:
         self.chunker = chunker or MarkdownSectionChunker()
 
     def index_path(self, path: str | Path) -> IndexingResult:
+        """Load and index every Markdown document under a path."""
         return self.index_documents(load_markdown_documents(path))
 
     def index_documents(self, documents: Sequence[MarkdownDocument]) -> IndexingResult:
+        """Chunk and index a sequence of Markdown documents."""
         chunk_count = 0
         for document in documents:
             chunks = self.chunker.chunk_document(document)

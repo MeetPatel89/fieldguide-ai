@@ -1,8 +1,9 @@
+"""Interactive entry point for the dataframe-backed LangChain agent."""
+
 from __future__ import annotations
 
-import glob
-import os
 import sys
+from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -35,8 +36,9 @@ DATASET_METADATA = {
 
 
 def load_dataset_specs(common_path: str) -> list[DatasetSpec]:
+    """Load CSV files from a directory as dataset specifications."""
     specs: list[DatasetSpec] = []
-    files = sorted(glob.glob(os.path.join(common_path, "*.csv")))
+    files = sorted(Path(common_path).glob("*.csv"))
     if not files:
         raise ValueError(f"No CSV files found in {common_path}.")
 
@@ -44,19 +46,21 @@ def load_dataset_specs(common_path: str) -> list[DatasetSpec]:
         try:
             dataframe = pd.read_csv(file_path)
         except Exception as exc:
-            raise ValueError(f"Failed to load '{file_path}' as a dataframe: {exc}") from exc
+            raise ValueError(
+                f"Failed to load '{file_path}' as a dataframe: {exc}"
+            ) from exc
 
-        file_name = os.path.basename(file_path)
+        file_name = file_path.name
         dataset_name, description = DATASET_METADATA.get(
             file_name,
-            (os.path.splitext(file_name)[0], f"Dataset loaded from {file_name}."),
+            (file_path.stem, f"Dataset loaded from {file_name}."),
         )
         specs.append(
             DatasetSpec(
                 name=dataset_name,
                 dataframe=dataframe,
                 description=description,
-                source_path=file_path,
+                source_path=str(file_path),
             )
         )
         print(
@@ -67,6 +71,7 @@ def load_dataset_specs(common_path: str) -> list[DatasetSpec]:
 
 
 def extract_assistant_text(agent_result: dict) -> str:
+    """Extract the latest textual AI message from an agent result."""
     messages = agent_result.get("messages", [])
     for message in reversed(messages):
         if isinstance(message, AIMessage):
@@ -85,20 +90,23 @@ def extract_assistant_text(agent_result: dict) -> str:
 
 
 def main() -> None:
+    """Run the interactive dataframe-agent session."""
     try:
         catalog = DataframeCatalog.from_specs(load_dataset_specs(COMMON_PATH))
     except ValueError as exc:
         print(f"ERROR: {exc}")
         sys.exit(1)
 
-    system_prompt = SystemMessage(content=(
-        "You are a smart data assistant capable of reading multiple CSV files.\n"
-        "Use tools before answering.\n"
-        "The available datasets are SaaS Docs, Credit Card Terms, Hospital Policy, "
-        "and Ecommerce FAQs.\n"
-        "Do not answer from general knowledge.\n"
-        "Answer in plain English and mention which dataset you used."
-    ))
+    system_prompt = SystemMessage(
+        content=(
+            "You are a smart data assistant capable of reading multiple CSV files.\n"
+            "Use tools before answering.\n"
+            "The available datasets are SaaS Docs, Credit Card Terms, Hospital Policy, "
+            "and Ecommerce FAQs.\n"
+            "Do not answer from general knowledge.\n"
+            "Answer in plain English and mention which dataset you used."
+        )
+    )
 
     model = ChatOpenAI(model="gpt-4o-mini")
     agent = create_pandas_like_agent(
@@ -117,9 +125,7 @@ def main() -> None:
         if not user_input.strip():
             continue
         try:
-            response = agent.invoke(
-                {"messages": [HumanMessage(content=user_input)]}
-            )
+            response = agent.invoke({"messages": [HumanMessage(content=user_input)]})
             print(extract_assistant_text(response))
         except Exception as exc:
             print(f"ERROR: {exc}")

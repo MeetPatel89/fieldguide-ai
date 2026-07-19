@@ -1,7 +1,8 @@
+"""Serialization helpers for vector-store metadata."""
+
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
 from fieldguide_ai.ingestion.models import DocumentChunk
 
@@ -9,6 +10,7 @@ VectorMetadataValue = str | int | float | bool | None
 
 
 def serialize_chunk_metadata(chunk: DocumentChunk) -> dict[str, VectorMetadataValue]:
+    """Serialize a document chunk as flat vector-store metadata."""
     metadata: dict[str, VectorMetadataValue] = {
         "chunk_id": chunk.chunk_id,
         "doc_id": chunk.doc_id,
@@ -34,7 +36,7 @@ def _section_title(chunk: DocumentChunk) -> str:
     return ""
 
 
-def _normalize_metadata_value(value: Any) -> VectorMetadataValue:
+def _normalize_metadata_value(value: object) -> VectorMetadataValue:
     if value is None:
         return None
     if isinstance(value, bool):
@@ -50,7 +52,7 @@ def _normalize_metadata_value(value: Any) -> VectorMetadataValue:
     return str(value)
 
 
-def _json_ready(value: Any) -> Any:
+def _json_ready(value: object) -> object:
     if isinstance(value, Mapping):
         return {str(key): _json_ready(item) for key, item in value.items()}
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):

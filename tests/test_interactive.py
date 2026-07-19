@@ -11,10 +11,10 @@ from fieldguide_ai.providers.base import LLMProvider
 
 
 class Answer:
-    def __init__(self, value) -> None:
+    def __init__(self, value: object) -> None:
         self.value = value
 
-    def ask(self):
+    def ask(self) -> object:
         return self.value
 
 

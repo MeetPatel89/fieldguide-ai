@@ -1,5 +1,6 @@
+"""NumPy-backed vector store with optional local persistence."""
+
 import json
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +44,7 @@ class NumpyVectorStore(VectorStore):
             self._records = self._load(self.path)
 
     def index_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
+        """Insert or update chunks by chunk ID."""
         if not chunks:
             return
         new_records = self._build_records(chunks)
@@ -51,6 +53,7 @@ class NumpyVectorStore(VectorStore):
         self._commit(records)
 
     def replace_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
+        """Replace all indexed chunks for the supplied documents."""
         if not chunks:
             return
 
@@ -65,6 +68,7 @@ class NumpyVectorStore(VectorStore):
         self._commit(records)
 
     def delete_documents(self, doc_ids: Sequence[str]) -> None:
+        """Delete every chunk belonging to the supplied document IDs."""
         deleted_doc_ids = set(doc_ids)
         if not deleted_doc_ids:
             return
@@ -77,6 +81,7 @@ class NumpyVectorStore(VectorStore):
             self._commit(records)
 
     def query(self, query_text: str, n_results: int = 10) -> list[VectorSearchResult]:
+        """Return the nearest indexed chunks in nearest-first order."""
         if n_results <= 0:
             raise ValueError("n_results must be greater than zero")
         if not self._records:
@@ -90,7 +95,8 @@ class NumpyVectorStore(VectorStore):
         matrix = np.vstack([record.embedding for record in records])
         if query_vector.shape[0] != matrix.shape[1]:
             raise ValueError(
-                f"query embedding dimension {query_vector.shape[0]} does not match index "
+                "query embedding dimension "
+                f"{query_vector.shape[0]} does not match index "
                 f"dimension {matrix.shape[1]}"
             )
 
@@ -114,8 +120,12 @@ class NumpyVectorStore(VectorStore):
             for index in ordered_indices
         ]
 
-    def _build_records(self, chunks: Sequence[DocumentChunk]) -> dict[str, _StoredVector]:
-        embeddings = self.embedding_provider.embed_texts([chunk.content for chunk in chunks])
+    def _build_records(
+        self, chunks: Sequence[DocumentChunk]
+    ) -> dict[str, _StoredVector]:
+        embeddings = self.embedding_provider.embed_texts(
+            [chunk.content for chunk in chunks]
+        )
         validate_embeddings(embeddings, len(chunks))
         self._validate_index_dimensions(embeddings[0])
 
@@ -166,18 +176,23 @@ class NumpyVectorStore(VectorStore):
                 temporary_path = temporary_file.name
                 np.savez_compressed(
                     temporary_file,
-                    chunk_ids=np.asarray([record.chunk_id for record in ordered_records]),
+                    chunk_ids=np.asarray(
+                        [record.chunk_id for record in ordered_records]
+                    ),
                     doc_ids=np.asarray([record.doc_id for record in ordered_records]),
                     contents=np.asarray([record.content for record in ordered_records]),
                     metadatas=np.asarray(
-                        [json.dumps(record.metadata, sort_keys=True) for record in ordered_records]
+                        [
+                            json.dumps(record.metadata, sort_keys=True)
+                            for record in ordered_records
+                        ]
                     ),
                     embeddings=embeddings,
                 )
-            os.replace(temporary_path, path)
+            Path(temporary_path).replace(path)
         finally:
-            if temporary_path is not None and os.path.exists(temporary_path):
-                os.unlink(temporary_path)
+            if temporary_path is not None and Path(temporary_path).exists():
+                Path(temporary_path).unlink()
 
     @staticmethod
     def _load(path: Path) -> dict[str, _StoredVector]:
@@ -192,10 +207,20 @@ class NumpyVectorStore(VectorStore):
             raise ValueError(f"invalid NumPy vector store at {path}") from error
 
         item_count = len(chunk_ids)
-        if not (len(doc_ids) == len(contents) == len(metadatas) == len(embeddings) == item_count):
-            raise ValueError(f"invalid NumPy vector store at {path}: inconsistent record counts")
+        if not (
+            len(doc_ids)
+            == len(contents)
+            == len(metadatas)
+            == len(embeddings)
+            == item_count
+        ):
+            raise ValueError(
+                f"invalid NumPy vector store at {path}: inconsistent record counts"
+            )
         if embeddings.ndim != 2:
-            raise ValueError(f"invalid NumPy vector store at {path}: embeddings must be a matrix")
+            raise ValueError(
+                f"invalid NumPy vector store at {path}: embeddings must be a matrix"
+            )
 
         records: dict[str, _StoredVector] = {}
         try:

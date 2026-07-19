@@ -1,5 +1,5 @@
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 import pandas as pd
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
@@ -10,7 +10,6 @@ from langchain_pandas import (
     build_tools,
     create_pandas_like_agent,
 )
-
 
 DATA_DIR = Path("data/corpora/nautilus/misc")
 
@@ -53,7 +52,9 @@ class LangchainPandasTest(unittest.TestCase):
 
         self.assertEqual(entry.id_column, "Policy ID")
         self.assertEqual(entry.source_name, "hospital_policy.csv")
-        self.assertEqual(entry.description, "Hospital operations and compliance policies.")
+        self.assertEqual(
+            entry.description, "Hospital operations and compliance policies."
+        )
 
     def test_catalog_rejects_duplicate_names(self) -> None:
         dataframe = pd.DataFrame({"ID": [1]})
@@ -74,16 +75,16 @@ class LangchainPandasTest(unittest.TestCase):
         self.assertIn("source=saas_docs.csv", output)
 
     def test_describe_dataframe_reports_expected_columns(self) -> None:
-        output = self.tools["describe_dataframe"].invoke(
-            {"dataset_name": "SaaS Docs"}
-        )
+        output = self.tools["describe_dataframe"].invoke({"dataset_name": "SaaS Docs"})
 
         self.assertIn("Technical Limit", output)
         self.assertIn("Related API", output)
         self.assertIn("ID column: Doc ID", output)
 
     def test_search_rows_finds_expected_text_matches(self) -> None:
-        output = self.tools["search_rows"].invoke({"query": "electronics return policy"})
+        output = self.tools["search_rows"].invoke(
+            {"query": "electronics return policy"}
+        )
 
         self.assertIn("Ecommerce FAQs", output)
         self.assertIn("What is the return policy for electronics?", output)

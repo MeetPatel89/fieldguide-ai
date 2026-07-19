@@ -1,7 +1,11 @@
-from pathlib import Path
 import unittest
+from pathlib import Path
 
-from fieldguide_ai.ingestion.chunkers import MarkdownSectionChunker, count_words, split_markdown_sections
+from fieldguide_ai.ingestion.chunkers import (
+    MarkdownSectionChunker,
+    count_words,
+    split_markdown_sections,
+)
 from fieldguide_ai.ingestion.models import MarkdownDocument
 
 
@@ -29,9 +33,13 @@ class MarkdownSectionChunkerTest(unittest.TestCase):
         self.assertEqual(len(sections), 3)
         self.assertEqual(sections[0].section_path, ("API Gateway Runbook",))
         self.assertIn("Intro text.", sections[0].content)
-        self.assertEqual(sections[1].section_path, ("API Gateway Runbook", "Initial triage"))
+        self.assertEqual(
+            sections[1].section_path, ("API Gateway Runbook", "Initial triage")
+        )
         self.assertIn("Collect the client ID.", sections[1].content)
-        self.assertEqual(sections[2].section_path, ("API Gateway Runbook", "Escalation criteria"))
+        self.assertEqual(
+            sections[2].section_path, ("API Gateway Runbook", "Escalation criteria")
+        )
 
     def test_chunk_document_attaches_metadata_to_each_chunk(self) -> None:
         document = MarkdownDocument(
@@ -61,7 +69,9 @@ class MarkdownSectionChunkerTest(unittest.TestCase):
         self.assertEqual(len(chunks), 1)
         self.assertEqual(chunks[0].chunk_id, "RUNBOOK-1::chunk-0000")
         self.assertEqual(chunks[0].doc_id, "RUNBOOK-1")
-        self.assertEqual(chunks[0].section_path, ("API Gateway Runbook", "Initial triage"))
+        self.assertEqual(
+            chunks[0].section_path, ("API Gateway Runbook", "Initial triage")
+        )
         self.assertEqual(chunks[0].metadata["doc_type"], "runbook")
         self.assertEqual(chunks[0].metadata["service_id"], "svc_api")
         self.assertEqual(chunks[0].metadata["owner_group"], "Platform Engineering")
@@ -77,7 +87,9 @@ class MarkdownSectionChunkerTest(unittest.TestCase):
             body=f"# Large Document\n\n## Long section\n\n{long_paragraph}",
         )
 
-        chunks = MarkdownSectionChunker(max_words=100, overlap_words=10).chunk_document(document)
+        chunks = MarkdownSectionChunker(max_words=100, overlap_words=10).chunk_document(
+            document
+        )
 
         self.assertGreater(len(chunks), 1)
         self.assertTrue(all(count_words(chunk.content) <= 100 for chunk in chunks))
@@ -87,7 +99,11 @@ class MarkdownSectionChunkerTest(unittest.TestCase):
     def test_chunk_record_is_serializable(self) -> None:
         document = MarkdownDocument(
             source_path=Path("known_issue.md"),
-            metadata={"doc_id": "KI-1", "title": "Known Issue", "doc_type": "known_issue"},
+            metadata={
+                "doc_id": "KI-1",
+                "title": "Known Issue",
+                "doc_type": "known_issue",
+            },
             body="# Known Issue\n\n## Summary\n\nUnexpected 429 errors.",
         )
 

@@ -1,3 +1,5 @@
+"""Chunkers for the ingestion pipeline."""
+
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -11,13 +13,23 @@ DEFAULT_OVERLAP_WORDS = 75
 
 @dataclass(frozen=True)
 class MarkdownSection:
+    """A markdown section."""
+
     title: str
     section_path: tuple[str, ...]
     content: str
 
 
 class MarkdownSectionChunker:
-    """Chunk markdown on semantic section boundaries before falling back to word splits."""
+    """Chunk markdown by section boundaries, then paragraphs and word splits.
+
+    Parameters
+    ----------
+    max_words : int
+        The maximum number of words per chunk.
+    overlap_words : int
+        The number of words to overlap between chunks.
+    """
 
     def __init__(
         self,
@@ -35,11 +47,25 @@ class MarkdownSectionChunker:
         self.overlap_words = overlap_words
 
     def chunk_document(self, document: MarkdownDocument) -> list[DocumentChunk]:
+        """Chunk a markdown document into chunks.
+
+        Parameters
+        ----------
+        document : MarkdownDocument
+            The markdown document to chunk.
+
+        Returns
+        -------
+        chunks : list[DocumentChunk]
+            The chunks of the markdown document.
+        """
         sections = split_markdown_sections(document.body, fallback_title=document.title)
         chunks: list[DocumentChunk] = []
 
         for section in sections:
-            for content in split_large_section(section.content, self.max_words, self.overlap_words):
+            for content in split_large_section(
+                section.content, self.max_words, self.overlap_words
+            ):
                 chunk_index = len(chunks)
                 chunks.append(
                     DocumentChunk(
@@ -56,6 +82,7 @@ class MarkdownSectionChunker:
         return chunks
 
     def chunk_documents(self, documents: list[MarkdownDocument]) -> list[DocumentChunk]:
+        """Chunk multiple Markdown documents in input order."""
         chunks: list[DocumentChunk] = []
         for document in documents:
             chunks.extend(self.chunk_document(document))
@@ -63,6 +90,20 @@ class MarkdownSectionChunker:
 
 
 def split_markdown_sections(body: str, fallback_title: str) -> list[MarkdownSection]:
+    """Split a markdown document into sections.
+
+    Parameters
+    ----------
+    body : str
+        The body of the markdown document.
+    fallback_title : str
+        The fallback title of the markdown document.
+
+    Returns
+    -------
+    sections : list[MarkdownSection]
+        The sections of the markdown document.
+    """
     lines = body.splitlines()
     document_title = fallback_title
     h1_seen = False
@@ -109,10 +150,15 @@ def split_markdown_sections(body: str, fallback_title: str) -> list[MarkdownSect
 
 
 def split_large_section(content: str, max_words: int, overlap_words: int) -> list[str]:
+    """Split an oversized section into overlapping chunks."""
     if count_words(content) <= max_words:
         return [content.strip()]
 
-    paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n", content) if paragraph.strip()]
+    paragraphs = [
+        paragraph.strip()
+        for paragraph in re.split(r"\n\s*\n", content)
+        if paragraph.strip()
+    ]
     chunks: list[str] = []
     current_paragraphs: list[str] = []
 
@@ -129,7 +175,9 @@ def split_large_section(content: str, max_words: int, overlap_words: int) -> lis
                 continue
 
             prefix = "\n\n".join(current_paragraphs).strip()
-            chunks.extend(_split_words_with_prefix(paragraph, prefix, max_words, overlap_words))
+            chunks.extend(
+                _split_words_with_prefix(paragraph, prefix, max_words, overlap_words)
+            )
             current_paragraphs = []
             continue
 
@@ -140,16 +188,24 @@ def split_large_section(content: str, max_words: int, overlap_words: int) -> lis
             current_paragraphs.append(paragraph)
 
     if current_paragraphs:
-        chunks.append("\n\n".join(paragraph for paragraph in current_paragraphs if paragraph).strip())
+        chunks.append(
+            "\n\n".join(
+                paragraph for paragraph in current_paragraphs if paragraph
+            ).strip()
+        )
 
     return [chunk for chunk in chunks if chunk]
 
 
 def count_words(text: str) -> int:
+    """Count whitespace-delimited words in text."""
     return len(re.findall(r"\S+", text))
 
 
-def build_chunk_metadata(document: MarkdownDocument, section: MarkdownSection) -> dict[str, Any]:
+def build_chunk_metadata(
+    document: MarkdownDocument, section: MarkdownSection
+) -> dict[str, Any]:
+    """Build retrieval metadata for a document section."""
     keys = [
         "title",
         "doc_type",
@@ -164,7 +220,9 @@ def build_chunk_metadata(document: MarkdownDocument, section: MarkdownSection) -
         "difficulty_tags",
         "servicenow",
     ]
-    metadata = {key: document.metadata.get(key) for key in keys if key in document.metadata}
+    metadata = {
+        key: document.metadata.get(key) for key in keys if key in document.metadata
+    }
     metadata["section_title"] = section.title
     return metadata
 
@@ -180,7 +238,9 @@ def _append_section(
         return
 
     section_title = current_title or document_title
-    section_path = (document_title,) if current_title is None else (document_title, current_title)
+    section_path = (
+        (document_title,) if current_title is None else (document_title, current_title)
+    )
     sections.append(
         MarkdownSection(
             title=section_title,

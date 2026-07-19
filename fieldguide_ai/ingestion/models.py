@@ -1,3 +1,5 @@
+"""Models for the ingestion pipeline."""
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -13,10 +15,24 @@ class MarkdownDocument:
 
     @property
     def doc_id(self) -> str:
+        """The document ID.
+
+        Returns
+        -------
+        doc_id : str
+            The document ID.
+        """
         return str(self.metadata.get("doc_id") or self.source_path.stem)
 
     @property
     def title(self) -> str:
+        """The document title.
+
+        Returns
+        -------
+        title : str
+            The document title.
+        """
         return str(self.metadata.get("title") or self.source_path.stem)
 
 
@@ -33,6 +49,13 @@ class DocumentChunk:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_record(self) -> dict[str, Any]:
+        """Convert the document chunk to a record.
+
+        Returns
+        -------
+        record : dict[str, Any]
+            The record of the document chunk.
+        """
         return {
             "chunk_id": self.chunk_id,
             "doc_id": self.doc_id,

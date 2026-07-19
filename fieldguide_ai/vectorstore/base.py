@@ -1,3 +1,5 @@
+"""Provider-neutral vector-store interfaces and validation."""
+
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -17,12 +19,16 @@ class VectorSearchResult:
 
 
 class EmbeddingProvider(ABC):
+    """Interface for text embedding providers."""
+
     @abstractmethod
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed a batch of texts in input order."""
 
 
 class VectorStore(ABC):
+    """Interface for persistent vector indexes."""
+
     @abstractmethod
     def index_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
         """Insert or update chunks by chunk ID."""
@@ -43,9 +49,11 @@ class VectorStore(ABC):
 def validate_embeddings(
     embeddings: Sequence[Sequence[float]], expected_count: int
 ) -> None:
+    """Validate the count and dimensions of embedding vectors."""
     if len(embeddings) != expected_count:
         raise ValueError(
-            f"embedding provider returned {len(embeddings)} embeddings for {expected_count} texts"
+            "embedding provider returned "
+            f"{len(embeddings)} embeddings for {expected_count} texts"
         )
     if embeddings and not embeddings[0]:
         raise ValueError("embedding vectors cannot be empty")
