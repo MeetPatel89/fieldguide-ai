@@ -22,9 +22,10 @@ Create a local `.env` file:
 
 ```dotenv
 OPENAI_API_KEY=your-api-key
+ANTHROPIC_API_KEY=your-anthropic-api-key
 ```
 
-Do not commit `.env` or real credentials.
+`OPENAI_API_KEY` is required for embeddings and OpenAI chat. Set `ANTHROPIC_API_KEY` when using Anthropic chat. Do not commit `.env` or real credentials.
 
 Start the guided CLI:
 
@@ -55,7 +56,7 @@ Operational knowledge often lives across runbooks, policies, product documentati
 
 Loading, chunking, validation, persistence, and dataframe operations are deterministic and remain ordinary Python pipelines. A model is useful where the user asks open-ended questions, conversational context must be maintained, or the appropriate dataframe tool and arguments must be selected dynamically.
 
-The project does not treat every step as agentic. Deterministic work stays explicit and testable; model-driven work is isolated behind provider and tool interfaces.
+The project does not treat every step as agentic. Deterministic work stays explicit and testable; model-driven work is isolated behind provider and tool interfaces. Provider SDK clients, credentials, vector stores, and filesystem loading enter through explicit composition boundaries so core conversation and indexing behavior can be tested without network or disk access.
 
 ## Usage
 
@@ -188,15 +189,16 @@ User
 
 | Component | Responsibility |
 | --- | --- |
-| `fieldguide_ai/interactive.py` | Rich guided configuration, ingestion, sourced chat, and live session commands. |
-| `fieldguide_ai/knowledge_bot.py` | Optional retrieval, prompt augmentation, raw history preservation, and sourced answers. |
+| `fieldguide_ai/interactive.py` | Rich guided configuration, immutable validated session settings, sourced chat, and live session commands. |
+| `fieldguide_ai/knowledge_bot.py` | Optional retrieval through a focused search boundary, prompt augmentation, raw history preservation, and sourced answers. |
 | `fieldguide_ai/cli.py` | Flag-based commands, indexing orchestration, and retrieval-capable chat loop. |
-| `fieldguide_ai/messages.py` | Canonical provider-agnostic `ChatMessage` conversation turns. |
+| `fieldguide_ai/messages.py` | Validated, immutable provider-agnostic `ChatMessage` conversation turns. |
 | `fieldguide_ai/generation.py` | Normalized `GenerationResult` plus token-usage metadata. |
-| `fieldguide_ai/providers/` | Provider interface, registry, adapters, and response extractors. |
-| `fieldguide_ai/ingestion/` | Markdown loading, frontmatter parsing, section chunking, and document replacement. |
-| `fieldguide_ai/vectorstore/` | Embedding abstraction plus Chroma, NumPy, and FAISS persistence/search. |
-| `langchain_pandas/` | Dataframe catalog and constrained inspection/query tools. |
+| `fieldguide_ai/providers/` | Stateful conversation abstraction, immutable registry, SDK adapters, explicit backend dependencies, and normalized provider errors. |
+| `fieldguide_ai/ingestion/` | Markdown loading, frontmatter parsing, section chunking, and document replacement through a focused index boundary. |
+| `fieldguide_ai/vectorstore/` | Focused search/index interfaces, composition factory, embedding abstraction, and Chroma/NumPy/FAISS persistence. |
+| `fieldguide_ai/errors.py` | Application-level configuration, provider, embedding, document-loading, and vector-store exceptions. |
+| `langchain_pandas/` | Validated dataframe catalog with defensive snapshots and constrained inspection/query tools. |
 
 ## Observable workflows
 
@@ -216,7 +218,7 @@ Embedding is completed before persisted document records are replaced, reducing 
 1. Set the configured system prompt on the provider, separate from turn history.
 2. Embed the question and retrieve the configured number of nearest chunks when a vector store is enabled.
 3. Send accumulated turns plus an augmented copy of the current question and retrieved context to the provider. Only the original question is stored in visible history.
-4. Normalize the provider payload into a `GenerationResult`, append the answer to history, and display its retrieved document/section sources.
+4. Normalize the provider payload into a `GenerationResult`; only after generation succeeds, atomically append the original user question and answer to history, then display the retrieved document/section sources.
 5. Allow the user to inspect, clear, or reconfigure the session. Provider and model changes preserve turn history where possible; clearing keeps the system prompt and generation log.
 
 This describes observable state and tool flow; it does not expose hidden model reasoning.
@@ -236,6 +238,7 @@ This describes observable state and tool flow; it does not expose hidden model r
 | Retrieval count | `5` | Configurable with `--top-k`; shown in the interactive summary. |
 | Maximum chunk size | `900` words | Large sections use overlapping splits. |
 | `OPENAI_API_KEY` | None | Required before constructing OpenAI chat or embedding clients. |
+| `ANTHROPIC_API_KEY` | None | Required before constructing an Anthropic chat client. |
 
 ## Testing and quality checks
 
@@ -259,11 +262,11 @@ uv sync --extra dev
 uv run pyright
 ```
 
-Tests cover message history, provider behavior, interactive configuration and commands, KnowledgeBot context/history behavior, Markdown parsing and chunking, Chroma/NumPy/FAISS persistence and search, metadata serialization, and dataframe tools.
+Tests cover validated and defensive value objects, atomic message history, provider error translation and dependency injection, immutable interactive configuration, KnowledgeBot context/history behavior, Markdown parsing and chunking, Chroma/NumPy/FAISS persistence and search, metadata serialization, and dataframe tools.
 
 ## Guardrails and data handling
 
-- Credentials are read from the environment and must not be committed.
+- CLI entry points read credentials from the environment and inject them into provider backends; credentials must not be committed.
 - Ingestion reads local Markdown content and persists embeddings and source text locally in the selected store.
 - The dataframe agent is instructed to use its registered tools and avoid answering from general knowledge, but model output should still be treated as untrusted until independently verified.
 - Retrieved local chunk text is sent to the configured model provider as prompt context.
@@ -305,6 +308,8 @@ Do not interpret passing unit tests as evidence of answer quality or production 
 │   ├── knowledge_bot.py    # Retrieval-grounded chat orchestration
 │   ├── messages.py         # Canonical ChatMessage turns
 │   ├── generation.py       # GenerationResult and token usage
+│   ├── errors.py           # Stable application-level error boundary
+│   ├── terminal.py         # Shared terminal history rendering
 │   ├── cli.py              # Flag-based CLI and chat loop
 │   └── interactive.py      # Rich questionary wizard and chat loop
 ├── langchain_pandas/       # Dataframe agent catalog and tools
@@ -316,7 +321,7 @@ Do not interpret passing unit tests as evidence of answer quality or production 
 
 ## Extension points
 
-- Register another LLM by implementing `ProviderBackend` for SDK-client construction and model discovery, implementing `LLMProvider` for a configured chat session, and adding their `ProviderSpec` metadata in `fieldguide_ai/providers/registry.py`.
+- Register another LLM by implementing `ProviderBackend` for SDK-client construction and model discovery, implementing `LLMProvider` for a configured chat session, and composing a validated `ProviderSpec` into a `ProviderRegistry`.
 - Add another vector backend by implementing the `VectorStore` interface and wiring it into CLI construction.
 - Add ingestion formats behind loaders that produce the existing document model.
 - Add safe dataframe operations as explicit tools rather than enabling arbitrary Python execution.

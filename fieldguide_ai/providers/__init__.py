@@ -7,10 +7,12 @@ from fieldguide_ai.providers.anthropic_provider import (
 from fieldguide_ai.providers.base import LLMProvider, ProviderBackend
 from fieldguide_ai.providers.openai_provider import OpenAIBackend, OpenAIProvider
 from fieldguide_ai.providers.registry import (
-    PROVIDERS,
+    ProviderRegistry,
     ProviderSpec,
     build_provider,
+    create_provider_registry,
     get_provider,
+    registry_from_environment,
 )
 
 __all__ = [
@@ -19,9 +21,11 @@ __all__ = [
     "LLMProvider",
     "OpenAIBackend",
     "OpenAIProvider",
-    "PROVIDERS",
+    "ProviderRegistry",
     "ProviderSpec",
     "ProviderBackend",
     "build_provider",
+    "create_provider_registry",
     "get_provider",
+    "registry_from_environment",
 ]

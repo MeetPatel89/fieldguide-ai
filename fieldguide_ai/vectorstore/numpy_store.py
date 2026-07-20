@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from fieldguide_ai.errors import InvalidVectorStoreError, VectorStoreOperationError
 from fieldguide_ai.ingestion.models import DocumentChunk
 from fieldguide_ai.vectorstore.base import (
     EmbeddingProvider,
@@ -18,6 +19,8 @@ from fieldguide_ai.vectorstore.base import (
     validate_embeddings,
 )
 from fieldguide_ai.vectorstore.metadata import serialize_chunk_metadata
+
+DEFAULT_NUMPY_PATH = "numpy_index.npz"
 
 
 @dataclass(frozen=True)
@@ -37,11 +40,11 @@ class NumpyVectorStore(VectorStore):
         embedding_provider: EmbeddingProvider,
         path: str | Path | None = None,
     ) -> None:
-        self.embedding_provider = embedding_provider
-        self.path = Path(path) if path is not None else None
+        self._embedding_provider = embedding_provider
+        self._path = Path(path) if path is not None else None
         self._records: dict[str, _StoredVector] = {}
-        if self.path is not None and self.path.exists():
-            self._records = self._load(self.path)
+        if self._path is not None and self._path.exists():
+            self._records = self._load(self._path)
 
     def index_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
         """Insert or update chunks by chunk ID."""
@@ -87,7 +90,7 @@ class NumpyVectorStore(VectorStore):
         if not self._records:
             return []
 
-        query_embeddings = self.embedding_provider.embed_texts([query_text])
+        query_embeddings = self._embedding_provider.embed_texts([query_text])
         validate_embeddings(query_embeddings, 1)
         query_vector = np.asarray(query_embeddings[0], dtype=np.float64)
 
@@ -123,7 +126,7 @@ class NumpyVectorStore(VectorStore):
     def _build_records(
         self, chunks: Sequence[DocumentChunk]
     ) -> dict[str, _StoredVector]:
-        embeddings = self.embedding_provider.embed_texts(
+        embeddings = self._embedding_provider.embed_texts(
             [chunk.content for chunk in chunks]
         )
         validate_embeddings(embeddings, len(chunks))
@@ -154,8 +157,13 @@ class NumpyVectorStore(VectorStore):
             )
 
     def _commit(self, records: dict[str, _StoredVector]) -> None:
-        if self.path is not None:
-            self._persist(self.path, records)
+        if self._path is not None:
+            try:
+                self._persist(self._path, records)
+            except OSError as error:
+                raise VectorStoreOperationError(
+                    f"could not persist NumPy vector store at {self._path}"
+                ) from error
         self._records = records
 
     @staticmethod
@@ -204,7 +212,9 @@ class NumpyVectorStore(VectorStore):
                 metadatas = data["metadatas"]
                 embeddings = np.asarray(data["embeddings"], dtype=np.float64)
         except (KeyError, OSError, ValueError) as error:
-            raise ValueError(f"invalid NumPy vector store at {path}") from error
+            raise InvalidVectorStoreError(
+                f"invalid NumPy vector store at {path}"
+            ) from error
 
         item_count = len(chunk_ids)
         if not (
@@ -214,11 +224,11 @@ class NumpyVectorStore(VectorStore):
             == len(embeddings)
             == item_count
         ):
-            raise ValueError(
+            raise InvalidVectorStoreError(
                 f"invalid NumPy vector store at {path}: inconsistent record counts"
             )
         if embeddings.ndim != 2:
-            raise ValueError(
+            raise InvalidVectorStoreError(
                 f"invalid NumPy vector store at {path}: embeddings must be a matrix"
             )
 
@@ -237,5 +247,7 @@ class NumpyVectorStore(VectorStore):
                     embedding=embeddings[index],
                 )
         except (json.JSONDecodeError, TypeError, ValueError) as error:
-            raise ValueError(f"invalid NumPy vector store at {path}") from error
+            raise InvalidVectorStoreError(
+                f"invalid NumPy vector store at {path}"
+            ) from error
         return records

@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock
 
+from fieldguide_ai.errors import EmbeddingError, VectorStoreOperationError
 from fieldguide_ai.ingestion.models import DocumentChunk
 from fieldguide_ai.vectorstore import (
     ChromaVectorStore,
@@ -70,6 +71,25 @@ class OpenAIEmbeddingProviderTest(unittest.TestCase):
         self.assertEqual(provider.embed_texts([]), [])
         client.embeddings.create.assert_not_called()
 
+    def test_injected_client_does_not_require_an_api_key(self) -> None:
+        client = Mock()
+        client.embeddings.create.return_value = Mock(data=[])
+
+        provider = OpenAIEmbeddingProvider(api_key=None, client=client)
+
+        self.assertEqual(provider.embed_texts(["text"]), [])
+
+    def test_translates_sdk_errors_and_preserves_context(self) -> None:
+        client = Mock()
+        sdk_error = ConnectionError("network unavailable")
+        client.embeddings.create.side_effect = sdk_error
+        provider = OpenAIEmbeddingProvider(api_key=None, client=client)
+
+        with self.assertRaises(EmbeddingError) as raised:
+            provider.embed_texts(["text"])
+
+        self.assertIs(raised.exception.__cause__, sdk_error)
+
 
 class ChromaVectorStoreTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -87,10 +107,22 @@ class ChromaVectorStoreTest(unittest.TestCase):
         )
 
     def test_creates_or_reuses_named_collection(self) -> None:
-        self.assertIs(self.store.get_collection(), self.collection)
         self.client.get_or_create_collection.assert_called_once_with(
             name="knowledge-base"
         )
+
+    def test_result_metadata_is_a_defensive_copy(self) -> None:
+        self.collection.query.return_value = {
+            "ids": [["DOC-1::chunk-0000"]],
+            "documents": [["First chunk"]],
+            "metadatas": [[{"doc_id": "DOC-1", "tags": ["original"]}]],
+            "distances": [[0.125]],
+        }
+
+        result = self.store.query("query", n_results=1)[0]
+        result.metadata["tags"].append("changed")
+
+        self.assertEqual(result.metadata["tags"], ["original"])
 
     def test_indexes_and_replaces_document_chunks(self) -> None:
         chunk = make_chunk("DOC-1::chunk-0000", "DOC-1", "First chunk")
@@ -120,6 +152,15 @@ class ChromaVectorStoreTest(unittest.TestCase):
             n_results=3,
             include=["documents", "metadatas", "distances"],
         )
+
+    def test_query_translates_chroma_errors(self) -> None:
+        chroma_error = RuntimeError("database unavailable")
+        self.collection.query.side_effect = chroma_error
+
+        with self.assertRaises(VectorStoreOperationError) as raised:
+            self.store.query("query")
+
+        self.assertIs(raised.exception.__cause__, chroma_error)
 
     def test_empty_index_is_a_noop(self) -> None:
         self.store.index_chunks([])

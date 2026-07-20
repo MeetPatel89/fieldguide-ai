@@ -1,19 +1,47 @@
 """Retrieval-grounded chat orchestration."""
 
-from collections.abc import Iterator
-from dataclasses import dataclass
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass, field
+from typing import Protocol
 
+from fieldguide_ai.errors import ConfigurationError
+from fieldguide_ai.generation import GenerationResult
 from fieldguide_ai.messages import ChatMessage
-from fieldguide_ai.providers import LLMProvider
-from fieldguide_ai.vectorstore import VectorSearchResult, VectorStore
+from fieldguide_ai.vectorstore import VectorSearcher, VectorSearchResult
 
 
-@dataclass(frozen=True)
+class ChatSession(Protocol):
+    """Conversation behavior required by retrieval orchestration."""
+
+    def chat(self, message: str | ChatMessage) -> str:
+        """Send and record one conversation turn."""
+        ...
+
+    def complete_turn(
+        self,
+        message: str | ChatMessage,
+        *,
+        generation_message: ChatMessage | None = None,
+    ) -> GenerationResult:
+        """Generate and atomically record a conversation turn."""
+        ...
+
+
+@dataclass(frozen=True, init=False)
 class KnowledgeAnswer:
     """An assistant answer and the source chunks used to produce it."""
 
     answer: str
-    sources: list[VectorSearchResult]
+    _sources: tuple[VectorSearchResult, ...] = field(repr=False)
+
+    def __init__(self, answer: str, sources: Sequence[VectorSearchResult]) -> None:
+        object.__setattr__(self, "answer", answer)
+        object.__setattr__(self, "_sources", tuple(sources))
+
+    @property
+    def sources(self) -> list[VectorSearchResult]:
+        """A copy of the retrieval sources in ranking order."""
+        return list(self._sources)
 
     def __iter__(self) -> Iterator[str | list[VectorSearchResult]]:
         """Allow callers to unpack the answer and sources as a pair."""
@@ -26,37 +54,38 @@ class KnowledgeBot:
 
     def __init__(
         self,
-        provider: LLMProvider,
-        vector_store: VectorStore | None = None,
+        provider: ChatSession,
+        vector_store: VectorSearcher | None = None,
     ) -> None:
-        self.provider = provider
-        self.vector_store = vector_store
+        self._provider = provider
+        self._vector_store = vector_store
 
     def ask(self, question: str, top_k: int = 5) -> KnowledgeAnswer:
         """Answer a question using the nearest indexed chunks when configured."""
         if top_k <= 0:
-            raise ValueError("top_k must be greater than zero")
-        if self.vector_store is None:
-            return KnowledgeAnswer(self.provider.chat(question), [])
+            raise ConfigurationError("top_k must be greater than zero")
+        if self._vector_store is None:
+            return KnowledgeAnswer(self._provider.chat(question), ())
 
-        sources = self.vector_store.query(question, n_results=top_k)
+        sources = self._vector_store.query(question, n_results=top_k)
         if not sources:
-            return KnowledgeAnswer(self.provider.chat(question), [])
+            return KnowledgeAnswer(self._provider.chat(question), ())
 
-        prior_history = self.provider.get_history()
-        self.provider.add_message(ChatMessage(role="user", content=question))
         augmented_question = _build_augmented_question(question, sources)
-        result = self.provider.generate(
-            [
-                *prior_history,
-                ChatMessage(role="user", content=augmented_question),
-            ]
+        result = self._provider.complete_turn(
+            question,
+            generation_message=ChatMessage(
+                role="user",
+                content=augmented_question,
+            ),
         )
-        self.provider.add_message(ChatMessage(role="assistant", content=result.text))
         return KnowledgeAnswer(result.text, sources)
 
 
-def _build_augmented_question(question: str, sources: list[VectorSearchResult]) -> str:
+def _build_augmented_question(
+    question: str,
+    sources: Sequence[VectorSearchResult],
+) -> str:
     context_parts: list[str] = []
     for index, source in enumerate(sources, start=1):
         source_path = source.metadata.get("source_path", "unknown")

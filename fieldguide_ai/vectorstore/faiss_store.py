@@ -11,6 +11,7 @@ import faiss
 import numpy as np
 from numpy.typing import NDArray
 
+from fieldguide_ai.errors import InvalidVectorStoreError, VectorStoreOperationError
 from fieldguide_ai.ingestion.models import DocumentChunk
 from fieldguide_ai.vectorstore.base import (
     EmbeddingProvider,
@@ -39,10 +40,10 @@ class FaissVectorStore(VectorStore):
         embedding_provider: EmbeddingProvider,
         path: str | Path = DEFAULT_FAISS_PATH,
     ) -> None:
-        self.embedding_provider = embedding_provider
-        self.path = Path(path)
-        self.index_path = Path(f"{self.path}.faiss")
-        self.metadata_path = Path(f"{self.path}.json")
+        self._embedding_provider = embedding_provider
+        self._path = Path(path)
+        self._index_path = Path(f"{self._path}.faiss")
+        self._metadata_path = Path(f"{self._path}.json")
         self._index: faiss.Index | None = None
         self._records: dict[int, _StoredChunk] = {}
         self._load_if_present()
@@ -88,7 +89,7 @@ class FaissVectorStore(VectorStore):
         if not self._records or self._index is None:
             return []
 
-        embeddings = self.embedding_provider.embed_texts([query_text])
+        embeddings = self._embedding_provider.embed_texts([query_text])
         validate_embeddings(embeddings, 1)
         query_vector = self._normalized_matrix(embeddings)
         if query_vector.shape[1] != self._index.d:
@@ -116,7 +117,7 @@ class FaissVectorStore(VectorStore):
         return results[:n_results]
 
     def _embed_chunks(self, chunks: Sequence[DocumentChunk]) -> NDArray[np.float32]:
-        embeddings = self.embedding_provider.embed_texts(
+        embeddings = self._embedding_provider.embed_texts(
             [chunk.content for chunk in chunks]
         )
         validate_embeddings(embeddings, len(chunks))
@@ -189,12 +190,17 @@ class FaissVectorStore(VectorStore):
         self._commit(index, records)
 
     def _commit(self, index: faiss.Index, records: dict[int, _StoredChunk]) -> None:
-        self._persist(index, records)
+        try:
+            self._persist(index, records)
+        except (OSError, RuntimeError) as error:
+            raise VectorStoreOperationError(
+                f"could not persist FAISS vector store at {self._path}"
+            ) from error
         self._index = index
         self._records = records
 
     def _persist(self, index: faiss.Index, records: Mapping[int, _StoredChunk]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
         temporary_index: str | None = None
         temporary_metadata: str | None = None
         payload = {
@@ -207,7 +213,7 @@ class FaissVectorStore(VectorStore):
         }
         try:
             with NamedTemporaryFile(
-                suffix=".faiss", dir=self.path.parent, delete=False
+                suffix=".faiss", dir=self._path.parent, delete=False
             ) as temporary_file:
                 temporary_index = temporary_file.name
             faiss.write_index(index, temporary_index)
@@ -215,31 +221,33 @@ class FaissVectorStore(VectorStore):
                 mode="w",
                 encoding="utf-8",
                 suffix=".json",
-                dir=self.path.parent,
+                dir=self._path.parent,
                 delete=False,
             ) as temporary_file:
                 temporary_metadata = temporary_file.name
                 json.dump(payload, temporary_file, sort_keys=True)
-            Path(temporary_index).replace(self.index_path)
-            Path(temporary_metadata).replace(self.metadata_path)
+            Path(temporary_index).replace(self._index_path)
+            Path(temporary_metadata).replace(self._metadata_path)
         finally:
             for temporary_path in (temporary_index, temporary_metadata):
                 if temporary_path is not None and Path(temporary_path).exists():
                     Path(temporary_path).unlink()
 
     def _load_if_present(self) -> None:
-        index_exists = self.index_path.exists()
-        metadata_exists = self.metadata_path.exists()
+        index_exists = self._index_path.exists()
+        metadata_exists = self._metadata_path.exists()
         if not index_exists and not metadata_exists:
             return
         if index_exists != metadata_exists:
-            raise ValueError(f"incomplete FAISS vector store at {self.path}")
+            raise InvalidVectorStoreError(
+                f"incomplete FAISS vector store at {self._path}"
+            )
 
         try:
-            index = faiss.read_index(str(self.index_path))
+            index = faiss.read_index(str(self._index_path))
             if not isinstance(index, faiss.IndexIDMap2):
                 raise ValueError("index must use IndexIDMap2")
-            payload = json.loads(self.metadata_path.read_text(encoding="utf-8"))
+            payload = json.loads(self._metadata_path.read_text(encoding="utf-8"))
             if not isinstance(payload, dict):
                 raise ValueError("metadata sidecar must be a JSON object")
             records: dict[int, _StoredChunk] = {}
@@ -271,6 +279,8 @@ class FaissVectorStore(VectorStore):
             TypeError,
             ValueError,
         ) as error:
-            raise ValueError(f"invalid FAISS vector store at {self.path}") from error
+            raise InvalidVectorStoreError(
+                f"invalid FAISS vector store at {self._path}"
+            ) from error
         self._index = index
         self._records = records

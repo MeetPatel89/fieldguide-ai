@@ -20,7 +20,7 @@ from fieldguide_ai.providers.base import LLMProvider
 
 
 class FakeProvider(LLMProvider):
-    def generate(self, messages: list[ChatMessage]) -> GenerationResult:
+    def generate(self, messages: Sequence[ChatMessage]) -> GenerationResult:
         user_messages = [
             message.content for message in messages if message.role == "user"
         ]

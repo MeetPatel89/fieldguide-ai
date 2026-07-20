@@ -43,8 +43,8 @@ class MarkdownSectionChunker:
         if overlap_words >= max_words:
             raise ValueError("overlap_words must be smaller than max_words")
 
-        self.max_words = max_words
-        self.overlap_words = overlap_words
+        self._max_words = max_words
+        self._overlap_words = overlap_words
 
     def chunk_document(self, document: MarkdownDocument) -> list[DocumentChunk]:
         """Chunk a markdown document into chunks.
@@ -64,7 +64,7 @@ class MarkdownSectionChunker:
 
         for section in sections:
             for content in split_large_section(
-                section.content, self.max_words, self.overlap_words
+                section.content, self._max_words, self._overlap_words
             ):
                 chunk_index = len(chunks)
                 chunks.append(
@@ -206,6 +206,7 @@ def build_chunk_metadata(
     document: MarkdownDocument, section: MarkdownSection
 ) -> dict[str, Any]:
     """Build retrieval metadata for a document section."""
+    document_metadata = document.metadata
     keys = [
         "title",
         "doc_type",
@@ -221,7 +222,7 @@ def build_chunk_metadata(
         "servicenow",
     ]
     metadata = {
-        key: document.metadata.get(key) for key in keys if key in document.metadata
+        key: document_metadata.get(key) for key in keys if key in document_metadata
     }
     metadata["section_title"] = section.title
     return metadata

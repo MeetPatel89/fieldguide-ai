@@ -110,10 +110,11 @@ def build_tools(catalog: DataframeCatalog) -> list[object]:
         """List all available datasets with source and shape metadata."""
         lines = ["Available datasets:"]
         for entry in catalog.all():
+            dataframe = entry.dataframe
             lines.append(
                 (
-                    f"- {entry.name}: {len(entry.dataframe)} rows x "
-                    f"{len(entry.dataframe.columns)} columns"
+                    f"- {entry.name}: {len(dataframe)} rows x "
+                    f"{len(dataframe.columns)} columns"
                     f"{_format_source(entry)}"
                     f"{_format_description(entry)}"
                 )
@@ -169,10 +170,11 @@ def build_tools(catalog: DataframeCatalog) -> list[object]:
         }
 
         for entry in entries:
-            searchable = _string_columns(entry.dataframe)
+            dataframe = entry.dataframe
+            searchable = _string_columns(dataframe)
             if not searchable:
                 continue
-            for _, row in entry.dataframe.iterrows():
+            for _, row in dataframe.iterrows():
                 values = [
                     str(row[column]) for column in searchable if pd.notna(row[column])
                 ]
@@ -218,12 +220,13 @@ def build_tools(catalog: DataframeCatalog) -> list[object]:
     ) -> str:
         """Filter rows in a dataset using validated column conditions."""
         entry = _get_entry(catalog, dataset_name)
-        filtered = _apply_filters(entry.dataframe, conditions)
+        dataframe = entry.dataframe
+        filtered = _apply_filters(dataframe, conditions)
         if sort_by:
-            _require_columns(entry.dataframe, [sort_by])
+            _require_columns(dataframe, [sort_by])
             filtered = filtered.sort_values(by=sort_by, ascending=not sort_desc)
         if columns:
-            _require_columns(entry.dataframe, columns)
+            _require_columns(dataframe, columns)
             filtered = filtered.loc[:, columns]
 
         limited = filtered.head(limit)
@@ -274,9 +277,10 @@ def build_tools(catalog: DataframeCatalog) -> list[object]:
     def distinct_values(dataset_name: str, column: str, limit: int = 20) -> str:
         """Count the most common distinct values for a dataset column."""
         entry = _get_entry(catalog, dataset_name)
-        _require_columns(entry.dataframe, [column])
+        dataframe = entry.dataframe
+        _require_columns(dataframe, [column])
         counts = (
-            entry.dataframe[column]
+            dataframe[column]
             .fillna("<NA>")
             .astype(str)
             .value_counts(dropna=False)
@@ -336,7 +340,7 @@ def _row_identifier(entry: DatasetEntry, row: pd.Series) -> str:
 
 def _row_excerpt(entry: DatasetEntry, row: pd.Series, max_fields: int = 3) -> str:
     fields: list[str] = []
-    for column in entry.dataframe.columns:
+    for column in row.index:
         if entry.id_column and column == entry.id_column:
             continue
         value = row[column]

@@ -8,27 +8,25 @@ TokenCount = Annotated[int, Field(ge=0)]
 LatencyMilliseconds = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
 
-class CanonicalModel(BaseModel):
-    """Shared validation behavior for canonical provider data."""
+class TokenUsage(BaseModel):
+    """Provider-agnostic token counts when available."""
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
-
-
-class TokenUsage(CanonicalModel):
-    """Provider-agnostic token counts when available."""
 
     input_tokens: TokenCount | None = None
     output_tokens: TokenCount | None = None
     total_tokens: TokenCount | None = None
 
 
-class GenerationResult(CanonicalModel):
+class GenerationResult(BaseModel):
     """Normalized generation output plus optional raw provider metadata.
 
     ``text`` is the application-facing assistant content used in chat history.
     Remaining fields capture telemetry for debugging, evaluation, and later
     persistence. ``raw`` should be JSON-serializable when present.
     """
+
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     text: str
     provider: str

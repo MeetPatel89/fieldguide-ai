@@ -8,6 +8,8 @@ from unittest.mock import Mock, patch
 from fieldguide_ai.providers import (
     AnthropicProvider,
     OpenAIProvider,
+    ProviderRegistry,
+    ProviderSpec,
     build_provider,
     get_provider,
 )
@@ -46,6 +48,30 @@ class ProviderRegistryTest(unittest.TestCase):
         models = spec.available_models()
 
         self.assertEqual(models, spec.models)
+
+    def test_registry_rejects_duplicate_names(self) -> None:
+        backend = Mock()
+        first = ProviderSpec(
+            name="duplicate",
+            label="First",
+            models=("model",),
+            default_model="model",
+            backend=backend,
+        )
+        second = replace(first, label="Second")
+
+        with self.assertRaisesRegex(ValueError, "duplicate provider registration"):
+            ProviderRegistry([first, second])
+
+    def test_provider_spec_rejects_an_unselectable_default(self) -> None:
+        with self.assertRaisesRegex(ValueError, "is not a fallback model"):
+            ProviderSpec(
+                name="invalid",
+                label="Invalid",
+                models=("available",),
+                default_model="missing",
+                backend=Mock(),
+            )
 
     @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})
     @patch("fieldguide_ai.providers.openai_provider.OpenAI")

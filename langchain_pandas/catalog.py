@@ -2,31 +2,86 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
+from typing import Mapping
 
 import pandas as pd
 
 
-@dataclass(frozen=True)
+class DatasetCatalogError(ValueError):
+    """Raised when dataframe catalog configuration or lookup is invalid."""
+
+
+@dataclass(frozen=True, init=False, eq=False)
 class DatasetSpec:
-    """User-supplied definition of a named dataset."""
+    """Validated user-supplied definition of a named dataset."""
 
     name: str
-    dataframe: pd.DataFrame
+    _dataframe: pd.DataFrame = field(repr=False, compare=False)
     description: str = ""
     source_path: str | None = None
 
+    def __init__(
+        self,
+        name: str,
+        dataframe: pd.DataFrame,
+        description: str = "",
+        source_path: str | None = None,
+    ) -> None:
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise DatasetCatalogError("Dataset names must be non-empty.")
+        if not isinstance(dataframe, pd.DataFrame):
+            raise DatasetCatalogError(
+                f"Dataset '{normalized_name}' must be a pandas DataFrame."
+            )
+        object.__setattr__(self, "name", normalized_name)
+        object.__setattr__(self, "_dataframe", dataframe.copy(deep=True))
+        object.__setattr__(self, "description", description.strip())
+        object.__setattr__(self, "source_path", source_path)
 
-@dataclass(frozen=True)
+    @property
+    def dataframe(self) -> pd.DataFrame:
+        """An independent copy of the supplied dataframe."""
+        return self._dataframe.copy(deep=True)
+
+
+@dataclass(frozen=True, init=False, eq=False)
 class DatasetEntry:
-    """Validated dataset entry stored in a dataframe catalog."""
+    """Encapsulated dataset entry stored in a dataframe catalog."""
 
     name: str
-    dataframe: pd.DataFrame
+    _dataframe: pd.DataFrame = field(repr=False, compare=False)
     description: str
     source_path: str | None
     id_column: str | None
+
+    def __init__(
+        self,
+        name: str,
+        dataframe: pd.DataFrame,
+        description: str,
+        source_path: str | None,
+        id_column: str | None,
+    ) -> None:
+        if not name.strip():
+            raise DatasetCatalogError("Dataset entry names must be non-empty.")
+        if id_column is not None and id_column not in dataframe.columns:
+            raise DatasetCatalogError(
+                f"ID column {id_column!r} is not present in {name!r}."
+            )
+        object.__setattr__(self, "name", name.strip())
+        object.__setattr__(self, "_dataframe", dataframe.copy(deep=True))
+        object.__setattr__(self, "description", description.strip())
+        object.__setattr__(self, "source_path", source_path)
+        object.__setattr__(self, "id_column", id_column)
+
+    @property
+    def dataframe(self) -> pd.DataFrame:
+        """An independent copy of the cataloged dataframe."""
+        return self._dataframe.copy(deep=True)
 
     @property
     def source_name(self) -> str:
@@ -40,8 +95,11 @@ class DataframeCatalog:
     """Provide validated, name-based access to dataframes."""
 
     def __init__(self, entries: list[DatasetEntry]) -> None:
-        self._entries = entries
-        self._by_name = {entry.name: entry for entry in entries}
+        by_name = {entry.name: entry for entry in entries}
+        if len(by_name) != len(entries):
+            raise DatasetCatalogError("Dataset entry names must be unique.")
+        self._entries = tuple(entries)
+        self._by_name: Mapping[str, DatasetEntry] = MappingProxyType(by_name)
 
     @classmethod
     def from_specs(cls, specs: list[DatasetSpec]) -> "DataframeCatalog":
@@ -49,24 +107,18 @@ class DataframeCatalog:
         entries: list[DatasetEntry] = []
         seen_names: set[str] = set()
         for spec in specs:
-            normalized_name = spec.name.strip()
-            if not normalized_name:
-                raise ValueError("Dataset names must be non-empty.")
-            if normalized_name in seen_names:
-                raise ValueError(f"Duplicate dataset name: {normalized_name}")
-            if not isinstance(spec.dataframe, pd.DataFrame):
-                raise ValueError(
-                    f"Dataset '{normalized_name}' must be a pandas DataFrame."
-                )
+            if spec.name in seen_names:
+                raise DatasetCatalogError(f"Duplicate dataset name: {spec.name}")
 
-            seen_names.add(normalized_name)
+            dataframe = spec.dataframe
+            seen_names.add(spec.name)
             entries.append(
                 DatasetEntry(
-                    name=normalized_name,
-                    dataframe=spec.dataframe,
-                    description=spec.description.strip(),
+                    name=spec.name,
+                    dataframe=dataframe,
+                    description=spec.description,
                     source_path=spec.source_path,
-                    id_column=infer_id_column(spec.dataframe),
+                    id_column=infer_id_column(dataframe),
                 )
             )
         return cls(entries)
@@ -81,7 +133,7 @@ class DataframeCatalog:
             return self._by_name[dataset_name]
         except KeyError as exc:
             available = ", ".join(self.names())
-            raise ValueError(
+            raise DatasetCatalogError(
                 f"Unknown dataset '{dataset_name}'. Available datasets: {available}."
             ) from exc
 

@@ -112,3 +112,20 @@ class MarkdownSectionChunkerTest(unittest.TestCase):
         self.assertEqual(record["chunk_id"], "KI-1::chunk-0000")
         self.assertEqual(record["source_path"], "known_issue.md")
         self.assertEqual(record["section_path"], ["Known Issue", "Summary"])
+
+    def test_document_and_chunk_metadata_are_defensive_copies(self) -> None:
+        metadata = {"related_records": ["original"]}
+        document = MarkdownDocument(
+            source_path=Path("guide.md"),
+            body="# Guide\n\nBody",
+            metadata=metadata,
+        )
+        metadata["related_records"].append("input mutation")
+        document.metadata["related_records"].append("output mutation")
+
+        chunk = MarkdownSectionChunker().chunk_document(document)[0]
+        chunk.metadata["related_records"].append("changed")
+
+        self.assertEqual(document.metadata["related_records"], ["original"])
+        self.assertEqual(chunk.metadata["related_records"], ["original"])
+        self.assertEqual(chunk.metadata["section_title"], "Guide")

@@ -12,3 +12,8 @@ class ChatMessage:
 
     role: Role
     content: str
+
+    def __post_init__(self) -> None:
+        """Keep invalid conversation turns out of provider sessions."""
+        if self.role not in ("user", "assistant"):
+            raise ValueError(f"unsupported chat role: {self.role}")

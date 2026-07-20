@@ -10,6 +10,7 @@ from typing import TextIO
 from dotenv import load_dotenv
 
 from fieldguide_ai.demo import build_demo_messages, build_system_prompt
+from fieldguide_ai.errors import ConfigurationError
 from fieldguide_ai.ingestion import (
     DocumentIndexingPipeline,
     IndexingResult,
@@ -20,32 +21,35 @@ from fieldguide_ai.knowledge_bot import KnowledgeBot
 from fieldguide_ai.providers import (
     LLMProvider,
     OpenAIProvider,
-    get_provider,
+    ProviderRegistry,
+    registry_from_environment,
 )
 from fieldguide_ai.providers import (
     build_provider as build_registered_provider,
 )
+from fieldguide_ai.providers.registry import OPENAI_DEFAULT_MODEL
+from fieldguide_ai.terminal import write_history
 from fieldguide_ai.vectorstore import (
     DEFAULT_COLLECTION_NAME,
     DEFAULT_EMBEDDING_MODEL,
-    DEFAULT_FAISS_PATH,
-    ChromaVectorStore,
     EmbeddingProvider,
-    FaissVectorStore,
-    NumpyVectorStore,
     OpenAIEmbeddingProvider,
     VectorStore,
 )
+from fieldguide_ai.vectorstore import (
+    build_vector_store as build_configured_vector_store,
+)
 
-DEFAULT_MODEL = get_provider("openai").default_model
-DEFAULT_CHROMA_PATH = "chroma_db"
-DEFAULT_NUMPY_PATH = "numpy_index.npz"
+DEFAULT_MODEL = OPENAI_DEFAULT_MODEL
 EXIT_COMMANDS = {":exit", ":q", ":quit", "exit", "quit"}
 
 
-def build_provider(model: str) -> OpenAIProvider:
+def build_provider(
+    model: str,
+    registry: ProviderRegistry | None = None,
+) -> OpenAIProvider:
     """Build the registered OpenAI provider for a model."""
-    provider = build_registered_provider("openai", model)
+    provider = build_registered_provider("openai", model, registry)
     if not isinstance(provider, OpenAIProvider):
         raise TypeError("the openai registry entry did not create an OpenAIProvider")
     return provider
@@ -58,28 +62,17 @@ def build_vector_store(
     collection_name: str = DEFAULT_COLLECTION_NAME,
 ) -> VectorStore:
     """Build the requested vector-store implementation."""
-    if provider_name == "chroma":
-        return ChromaVectorStore(
-            path=path or DEFAULT_CHROMA_PATH,
-            collection_name=collection_name,
-            embedding_provider=embedding_provider,
-        )
-    if provider_name == "numpy":
-        return NumpyVectorStore(
-            path=path or DEFAULT_NUMPY_PATH,
-            embedding_provider=embedding_provider,
-        )
-    if provider_name == "faiss":
-        return FaissVectorStore(
-            path=path or DEFAULT_FAISS_PATH,
-            embedding_provider=embedding_provider,
-        )
-    raise ValueError(f"unsupported vector store provider: {provider_name}")
+    return build_configured_vector_store(
+        provider_name=provider_name,
+        embedding_provider=embedding_provider,
+        path=path,
+        collection_name=collection_name,
+    )
 
 
 def run_demo(provider: LLMProvider, output_stream: TextIO = sys.stdout) -> None:
     """Run the stateless demonstration prompt."""
-    provider.system_prompt = build_system_prompt()
+    provider.set_system_prompt(build_system_prompt())
     result = provider.generate(build_demo_messages())
     output_stream.write(f"{result.text}\n")
 
@@ -93,7 +86,7 @@ def run_chat_loop(
     top_k: int = 5,
 ) -> None:
     """Run an interactive, stateful chat session with optional retrieval."""
-    provider.system_prompt = (
+    provider.set_system_prompt(
         build_system_prompt() if system_prompt is None else system_prompt
     )
     output_stream.write(
@@ -142,13 +135,7 @@ def run_chat_loop(
 
 def print_history(provider: LLMProvider, output_stream: TextIO = sys.stdout) -> None:
     """Write the provider's conversation history to a stream."""
-    index = 1
-    if provider.system_prompt is not None:
-        output_stream.write(f"{index}. system: {provider.system_prompt}\n")
-        index += 1
-    for message in provider.get_history():
-        output_stream.write(f"{index}. {message.role}: {message.content}\n")
-        index += 1
+    write_history(provider, output_stream)
 
 
 def preview_chunks(
@@ -300,6 +287,7 @@ def main(argv: list[str] | None = None) -> None:
     """Run the Fieldguide command-line interface."""
     load_dotenv()
     args = parse_args(argv)
+    provider_registry = registry_from_environment()
 
     if args.chunk_corpus:
         preview_chunks(
@@ -313,7 +301,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.index_corpus:
         if args.vector_store == "none":
             parser_error = "--vector-store none cannot be used with --index-corpus"
-            raise ValueError(parser_error)
+            raise ConfigurationError(parser_error)
         embedding_provider = OpenAIEmbeddingProvider(
             api_key=os.getenv("OPENAI_API_KEY"),
             model=args.embedding_model,
@@ -331,7 +319,7 @@ def main(argv: list[str] | None = None) -> None:
         )
         return
 
-    provider = build_provider(model=args.model)
+    provider = build_provider(model=args.model, registry=provider_registry)
 
     if args.demo:
         run_demo(provider)

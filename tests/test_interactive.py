@@ -1,12 +1,18 @@
 import io
 import os
 import unittest
+from collections.abc import Sequence
 from unittest.mock import Mock, patch
 
 from fieldguide_ai import interactive
 from fieldguide_ai.generation import GenerationResult
 from fieldguide_ai.messages import ChatMessage
-from fieldguide_ai.providers import OpenAIProvider, ProviderSpec, get_provider
+from fieldguide_ai.providers import (
+    OpenAIProvider,
+    ProviderRegistry,
+    ProviderSpec,
+    get_provider,
+)
 from fieldguide_ai.providers.base import LLMProvider
 from fieldguide_ai.vectorstore import VectorSearchResult
 
@@ -20,7 +26,7 @@ class Answer:
 
 
 class FakeProvider(LLMProvider):
-    def generate(self, messages: list[ChatMessage]) -> GenerationResult:
+    def generate(self, messages: Sequence[ChatMessage]) -> GenerationResult:
         return self._record_generation(
             GenerationResult(text="response", provider="fake", model="fake-model")
         )
@@ -61,6 +67,21 @@ class InteractiveWizardTest(unittest.TestCase):
             default_model="gpt-5-nano",
             backend=self.backend,
         )
+        self.registry = ProviderRegistry([self.provider_spec])
+
+    def test_session_reconfiguration_returns_a_new_validated_value(self) -> None:
+        config = interactive.SessionConfig()
+
+        updated = config.with_store(None, None, "documents").with_model("new-model")
+
+        self.assertEqual(config.model, "gpt-5-nano")
+        self.assertEqual(config.store_type, "chroma")
+        self.assertEqual(updated.model, "new-model")
+        self.assertIsNone(updated.store_type)
+
+    def test_session_rejects_partial_store_configuration(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires a path"):
+            interactive.SessionConfig(store_type="faiss", store_path=None)
 
     def test_wizard_builds_configured_store_for_retrieval(self) -> None:
         output_stream = io.StringIO()
@@ -68,9 +89,6 @@ class InteractiveWizardTest(unittest.TestCase):
         vector_store = Mock()
 
         with (
-            patch.dict(
-                interactive.PROVIDERS, {"openai": self.provider_spec}, clear=True
-            ),
             patch.object(
                 interactive.questionary,
                 "select",
@@ -92,7 +110,10 @@ class InteractiveWizardTest(unittest.TestCase):
             ) as build_vector_store,
             patch.object(interactive, "run_chat_loop") as run_chat_loop,
         ):
-            interactive.run_wizard(output_stream=output_stream)
+            interactive.run_wizard(
+                output_stream=output_stream,
+                registry=self.registry,
+            )
 
         build_vector_store.assert_called_once_with(
             provider_name="numpy",
@@ -110,9 +131,6 @@ class InteractiveWizardTest(unittest.TestCase):
         output_stream = io.StringIO()
 
         with (
-            patch.dict(
-                interactive.PROVIDERS, {"openai": self.provider_spec}, clear=True
-            ),
             patch.object(
                 interactive.questionary,
                 "select",
@@ -131,7 +149,10 @@ class InteractiveWizardTest(unittest.TestCase):
             patch.object(interactive, "OpenAIEmbeddingProvider") as embedding_type,
             patch.object(interactive, "run_chat_loop") as run_chat_loop,
         ):
-            interactive.run_wizard(output_stream=output_stream)
+            interactive.run_wizard(
+                output_stream=output_stream,
+                registry=self.registry,
+            )
 
         embedding_type.assert_not_called()
         confirm.assert_not_called()
@@ -144,9 +165,6 @@ class InteractiveWizardTest(unittest.TestCase):
         vector_store = Mock()
 
         with (
-            patch.dict(
-                interactive.PROVIDERS, {"openai": self.provider_spec}, clear=True
-            ),
             patch.object(
                 interactive.questionary,
                 "select",
@@ -173,7 +191,10 @@ class InteractiveWizardTest(unittest.TestCase):
             patch.object(interactive, "index_corpus") as index_corpus,
             patch.object(interactive, "run_chat_loop"),
         ):
-            interactive.run_wizard(output_stream=output_stream)
+            interactive.run_wizard(
+                output_stream=output_stream,
+                registry=self.registry,
+            )
 
         index_corpus.assert_called_once_with(
             corpus_path="docs",
@@ -181,7 +202,11 @@ class InteractiveWizardTest(unittest.TestCase):
             max_words=450,
             output_stream=output_stream,
         )
-        self.backend.build_provider.assert_called_once_with("custom-model")
+        self.backend.build_provider.assert_called_once_with(
+            "custom-model",
+            message_history=None,
+            system_prompt="Ground answers.",
+        )
 
     def test_rich_chat_displays_sources_and_raw_history(self) -> None:
         source = VectorSearchResult(
@@ -203,6 +228,7 @@ class InteractiveWizardTest(unittest.TestCase):
             output_stream=output_stream,
             config=config,
             vector_store=vector_store,
+            registry=self.registry,
         )
 
         output = output_stream.getvalue()
@@ -213,8 +239,12 @@ class InteractiveWizardTest(unittest.TestCase):
         self.assertEqual(self.provider.get_history()[0].content, "What is indexed?")
 
     def test_chat_commands_rebuild_components_and_preserve_history(self) -> None:
-        self.provider.add_message(ChatMessage(role="user", content="Earlier question"))
-        rebuilt_for_model = FakeProvider()
+        self.provider = FakeProvider(
+            message_history=[ChatMessage(role="user", content="Earlier question")]
+        )
+        rebuilt_for_model = FakeProvider(
+            message_history=[ChatMessage(role="user", content="Earlier question")]
+        )
         rebuilt_for_provider = FakeProvider()
         self.backend.build_provider.side_effect = [rebuilt_for_model]
         anthropic_backend = Mock()
@@ -230,12 +260,9 @@ class InteractiveWizardTest(unittest.TestCase):
         config = interactive.SessionConfig(system_prompt="Original prompt")
         output_stream = io.StringIO()
 
+        registry = ProviderRegistry([self.provider_spec, anthropic_spec])
+
         with (
-            patch.dict(
-                interactive.PROVIDERS,
-                {"openai": self.provider_spec, "anthropic": anthropic_spec},
-                clear=True,
-            ),
             patch.object(
                 interactive.questionary,
                 "select",
@@ -252,32 +279,59 @@ class InteractiveWizardTest(unittest.TestCase):
                 return_value=Answer("Updated prompt"),
             ),
         ):
-            interactive.run_chat_loop(
+            updated_config = interactive.run_chat_loop(
                 self.provider,
                 input_stream=io.StringIO(":model\n:store\n:system\n:provider\n:quit\n"),
                 output_stream=output_stream,
                 config=config,
                 vector_store=Mock(),
+                registry=registry,
             )
 
-        self.assertEqual(config.provider_name, "anthropic")
-        self.assertEqual(config.model, "claude-test")
-        self.assertIsNone(config.store_type)
-        self.assertEqual(config.system_prompt, "Updated prompt")
-        self.assertEqual(
-            rebuilt_for_provider.get_history(),
-            [ChatMessage(role="user", content="Earlier question")],
+        self.assertEqual(updated_config.provider_name, "anthropic")
+        self.assertEqual(updated_config.model, "claude-test")
+        self.assertIsNone(updated_config.store_type)
+        self.assertEqual(updated_config.system_prompt, "Updated prompt")
+        anthropic_backend.build_provider.assert_called_once_with(
+            "claude-test",
+            message_history=[ChatMessage(role="user", content="Earlier question")],
+            system_prompt="Updated prompt",
         )
-        self.assertEqual(rebuilt_for_provider.system_prompt, "Updated prompt")
+
+    def test_mid_session_cancellation_is_an_explicit_non_fatal_result(self) -> None:
+        output_stream = io.StringIO()
+
+        with patch.object(
+            interactive.questionary,
+            "select",
+            return_value=Answer(None),
+        ):
+            config = interactive.run_chat_loop(
+                self.provider,
+                input_stream=io.StringIO(":model\n:quit\n"),
+                output_stream=output_stream,
+                config=interactive.SessionConfig(
+                    store_type=None,
+                    store_path=None,
+                ),
+                registry=self.registry,
+            )
+
+        self.assertEqual(config.model, "gpt-5-nano")
+        self.assertIn("Configuration change cancelled.", output_stream.getvalue())
 
     @patch.object(
         interactive,
         "run_wizard",
-        side_effect=interactive.WizardCancelledError("Wizard operation cancelled."),
+        return_value=False,
     )
+    @patch.object(interactive, "registry_from_environment")
     @patch.object(interactive, "load_dotenv")
     def test_main_exits_cleanly_when_cancelled(
-        self, load_dotenv: Mock, run_wizard: Mock
+        self,
+        load_dotenv: Mock,
+        registry_from_environment: Mock,
+        run_wizard: Mock,
     ) -> None:
         with (
             patch.object(interactive.sys, "stderr"),
@@ -286,4 +340,7 @@ class InteractiveWizardTest(unittest.TestCase):
             interactive.main()
 
         load_dotenv.assert_called_once_with()
-        run_wizard.assert_called_once_with()
+        registry_from_environment.assert_called_once_with()
+        run_wizard.assert_called_once_with(
+            registry=registry_from_environment.return_value
+        )

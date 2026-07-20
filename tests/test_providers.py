@@ -1,6 +1,8 @@
 import unittest
+from collections.abc import Sequence
 from unittest.mock import Mock
 
+from fieldguide_ai.errors import ProviderGenerationError
 from fieldguide_ai.generation import GenerationResult, TokenUsage
 from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers.anthropic_provider import (
@@ -31,7 +33,7 @@ class FakeProvider(LLMProvider):
         self.last_messages: list[ChatMessage] | None = None
         self.last_system_prompt: str | None = None
 
-    def generate(self, messages: list[ChatMessage]) -> GenerationResult:
+    def generate(self, messages: Sequence[ChatMessage]) -> GenerationResult:
         self.last_messages = list(messages)
         self.last_system_prompt = self.system_prompt
         return self._record_generation(
@@ -118,14 +120,19 @@ class ProviderHistoryTest(unittest.TestCase):
         self.assertEqual(len(provider.get_generation_log()), 1)
 
     def test_generation_log_keeps_defensive_raw_snapshots(self) -> None:
-        provider = FakeProvider()
-        result = GenerationResult(
-            text="Response",
-            provider="fake",
-            model="fake-model",
-            raw={"events": ["created"]},
-        )
-        provider._record_generation(result)
+        class RawProvider(FakeProvider):
+            def generate(self, messages: Sequence[ChatMessage]) -> GenerationResult:
+                return self._record_generation(
+                    GenerationResult(
+                        text="Response",
+                        provider="fake",
+                        model="fake-model",
+                        raw={"events": ["created"]},
+                    )
+                )
+
+        provider = RawProvider()
+        result = provider.generate([])
 
         assert result.raw is not None
         events = result.raw["events"]
@@ -144,6 +151,23 @@ class ProviderHistoryTest(unittest.TestCase):
         self.assertEqual(
             provider.last_result.raw,
             {"events": ["created"]},
+        )
+
+    def test_failed_chat_does_not_leave_a_partial_turn_in_history(self) -> None:
+        class FailingProvider(FakeProvider):
+            def generate(self, messages: Sequence[ChatMessage]) -> GenerationResult:
+                raise RuntimeError("generation failed")
+
+        provider = FailingProvider(
+            message_history=[ChatMessage(role="user", content="Prior")]
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "generation failed"):
+            provider.chat("New question")
+
+        self.assertEqual(
+            provider.get_history(),
+            [ChatMessage(role="user", content="Prior")],
         )
 
     def test_get_history_returns_a_copy(self) -> None:
@@ -278,6 +302,18 @@ class OpenAIProviderTest(unittest.TestCase):
             ],
         )
 
+    def test_generate_translates_sdk_errors_and_preserves_context(self) -> None:
+        client = Mock()
+        sdk_error = ConnectionError("network unavailable")
+        client.responses.create.side_effect = sdk_error
+        provider = OpenAIProvider(client=client, model="test-model")
+
+        with self.assertRaises(ProviderGenerationError) as raised:
+            provider.chat("Hello")
+
+        self.assertIs(raised.exception.__cause__, sdk_error)
+        self.assertEqual(provider.get_history(), [])
+
 
 class AnthropicProviderTest(unittest.TestCase):
     def test_generate_passes_system_separately(self) -> None:
@@ -330,3 +366,15 @@ class AnthropicProviderTest(unittest.TestCase):
             model="test-model",
             messages=[{"role": "user", "content": "Hello"}],
         )
+
+    def test_generate_translates_sdk_errors_and_preserves_context(self) -> None:
+        client = Mock()
+        sdk_error = ConnectionError("network unavailable")
+        client.messages.create.side_effect = sdk_error
+        provider = AnthropicProvider(client=client, model="test-model")
+
+        with self.assertRaises(ProviderGenerationError) as raised:
+            provider.chat("Hello")
+
+        self.assertIs(raised.exception.__cause__, sdk_error)
+        self.assertEqual(provider.get_history(), [])

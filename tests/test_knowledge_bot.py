@@ -13,7 +13,7 @@ class FakeProvider(LLMProvider):
         super().__init__()
         self.generated_messages: list[ChatMessage] = []
 
-    def generate(self, messages: list[ChatMessage]) -> GenerationResult:
+    def generate(self, messages: Sequence[ChatMessage]) -> GenerationResult:
         self.generated_messages = list(messages)
         return self._record_generation(
             GenerationResult(text="Grounded answer", provider="fake", model="fake")

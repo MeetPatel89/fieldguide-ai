@@ -50,3 +50,21 @@ class DocumentIndexingPipelineTest(unittest.TestCase):
 
         self.assertEqual(result.chunk_count, 0)
         self.assertEqual(store.deletions, [["EMPTY"]])
+
+    def test_path_loading_is_an_injected_boundary(self) -> None:
+        store = RecordingVectorStore()
+        requested_paths: list[str | Path] = []
+        document = MarkdownDocument(source_path=Path("virtual.md"), body="# Virtual")
+
+        def load_documents(path: str | Path) -> list[MarkdownDocument]:
+            requested_paths.append(path)
+            return [document]
+
+        result = DocumentIndexingPipeline(
+            store,
+            document_loader=load_documents,
+        ).index_path("memory://corpus")
+
+        self.assertEqual(requested_paths, ["memory://corpus"])
+        self.assertEqual(result.document_count, 1)
+        self.assertEqual(result.chunk_count, 1)

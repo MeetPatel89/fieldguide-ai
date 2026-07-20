@@ -20,3 +20,6 @@ data/
 
 # vectordb
 vectordb/
+
+# misc
+explore*

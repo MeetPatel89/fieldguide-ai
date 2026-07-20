@@ -67,6 +67,22 @@ class LangchainPandasTest(unittest.TestCase):
                 ]
             )
 
+    def test_catalog_owns_a_defensive_dataframe_snapshot(self) -> None:
+        dataframe = pd.DataFrame({"ID": [1], "Value": ["original"]})
+        spec = DatasetSpec(name="Snapshot", dataframe=dataframe)
+        catalog = DataframeCatalog.from_specs([spec])
+
+        dataframe.loc[0, "Value"] = "input changed"
+        spec_copy = spec.dataframe
+        spec_copy.loc[0, "Value"] = "spec copy changed"
+        entry_copy = catalog.get("Snapshot").dataframe
+        entry_copy.loc[0, "Value"] = "entry copy changed"
+
+        self.assertEqual(
+            catalog.get("Snapshot").dataframe.loc[0, "Value"],
+            "original",
+        )
+
     def test_list_dataframes_reports_known_datasets(self) -> None:
         output = self.tools["list_dataframes"].invoke({})
 

@@ -5,6 +5,15 @@ alwaysApply: true
 
 Apply these rules whenever creating or modifying Python code.
 
+## Proportionality
+
+Apply these principles proportionally. Do not introduce patterns, interfaces,
+classes, repositories, factories, or dependency-injection machinery unless the
+current change has a concrete need for them.
+
+Prefer the simplest design that preserves clear responsibilities, encapsulation,
+testability, and dependency boundaries.
+
 ## Preserve architecture before optimizing locally
 
 Before changing code:

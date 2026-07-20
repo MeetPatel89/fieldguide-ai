@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from fieldguide_ai.errors import DocumentLoadError
 from fieldguide_ai.ingestion.loader import (
     load_markdown_document,
     load_markdown_documents,
@@ -9,6 +10,14 @@ from fieldguide_ai.ingestion.loader import (
 
 
 class MarkdownLoaderTest(unittest.TestCase):
+    def test_translates_file_read_errors(self) -> None:
+        missing_path = Path("does-not-exist.md")
+
+        with self.assertRaises(DocumentLoadError) as raised:
+            load_markdown_document(missing_path)
+
+        self.assertIsInstance(raised.exception.__cause__, OSError)
+
     def test_loads_frontmatter_and_body(self) -> None:
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "doc.md"

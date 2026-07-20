@@ -1,11 +1,12 @@
 """LangChain tools for querying cataloged pandas dataframes."""
 
 from langchain_pandas.agent import create_pandas_like_agent
-from langchain_pandas.catalog import DataframeCatalog, DatasetSpec
+from langchain_pandas.catalog import DataframeCatalog, DatasetCatalogError, DatasetSpec
 from langchain_pandas.tools import FilterCondition, build_tools
 
 __all__ = [
     "DataframeCatalog",
+    "DatasetCatalogError",
     "DatasetSpec",
     "FilterCondition",
     "build_tools",

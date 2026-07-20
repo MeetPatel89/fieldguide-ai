@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+from fieldguide_ai.errors import DocumentLoadError
 from fieldguide_ai.ingestion.models import MarkdownDocument
 
 FRONTMATTER_BOUNDARY = "---"
@@ -28,7 +29,12 @@ def load_markdown_document(path: str | Path) -> MarkdownDocument:
         The loaded markdown document.
     """
     source_path = Path(path)
-    raw_text = source_path.read_text(encoding="utf-8")
+    try:
+        raw_text = source_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise DocumentLoadError(
+            f"could not read Markdown document at {source_path}"
+        ) from error
     metadata, body = parse_markdown_frontmatter(raw_text)
     return MarkdownDocument(
         source_path=source_path, body=body.strip(), metadata=metadata
@@ -50,7 +56,13 @@ def load_markdown_documents(root: str | Path) -> list[MarkdownDocument]:
         The loaded markdown documents.
     """
     root_path = Path(root)
-    return [load_markdown_document(path) for path in sorted(root_path.rglob("*.md"))]
+    try:
+        paths = sorted(root_path.rglob("*.md"))
+    except OSError as error:
+        raise DocumentLoadError(
+            f"could not discover Markdown documents under {root_path}"
+        ) from error
+    return [load_markdown_document(path) for path in paths]
 
 
 def parse_markdown_frontmatter(raw_text: str) -> tuple[dict[str, Any], str]:
