@@ -8,14 +8,13 @@ from typing import Any
 from anthropic import Anthropic
 from anthropic.types import Message
 
+from fieldguide_ai.chat import ChatMessage, GenerationResult, TokenUsage
 from fieldguide_ai.errors import (
     ConfigurationError,
     ProviderDiscoveryError,
     ProviderGenerationError,
     ProviderInitializationError,
 )
-from fieldguide_ai.generation import GenerationResult, TokenUsage
-from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers.base import LLMProvider, ProviderBackend
 
 

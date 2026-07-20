@@ -14,6 +14,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from fieldguide_ai.chat import ChatMessage
 from fieldguide_ai.demo import build_system_prompt
 from fieldguide_ai.errors import ConfigurationError, FieldguideError
 from fieldguide_ai.ingestion import (
@@ -22,7 +23,6 @@ from fieldguide_ai.ingestion import (
     MarkdownSectionChunker,
 )
 from fieldguide_ai.knowledge_bot import KnowledgeAnswer, KnowledgeBot
-from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers import (
     LLMProvider,
     ProviderRegistry,

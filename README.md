@@ -192,8 +192,7 @@ User
 | `fieldguide_ai/interactive.py` | Rich guided configuration, immutable validated session settings, sourced chat, and live session commands. |
 | `fieldguide_ai/knowledge_bot.py` | Optional retrieval through a focused search boundary, prompt augmentation, raw history preservation, and sourced answers. |
 | `fieldguide_ai/cli.py` | Flag-based commands, indexing orchestration, and retrieval-capable chat loop. |
-| `fieldguide_ai/messages.py` | Validated, immutable provider-agnostic `ChatMessage` conversation turns. |
-| `fieldguide_ai/generation.py` | Normalized `GenerationResult` plus token-usage metadata. |
+| `fieldguide_ai/chat/` | Provider-agnostic chat communication objects: immutable `ChatMessage` turns plus normalized `GenerationResult` and token usage models. |
 | `fieldguide_ai/providers/` | Stateful conversation abstraction, immutable registry, SDK adapters, explicit backend dependencies, and normalized provider errors. |
 | `fieldguide_ai/ingestion/` | Markdown loading, frontmatter parsing, section chunking, and document replacement through a focused index boundary. |
 | `fieldguide_ai/vectorstore/` | Focused search/index interfaces, composition factory, embedding abstraction, and Chroma/NumPy/FAISS persistence. |
@@ -303,11 +302,10 @@ Do not interpret passing unit tests as evidence of answer quality or production 
 ├── .cursor/rules/          # Project rules, including README maintenance
 ├── fieldguide_ai/
 │   ├── ingestion/          # Markdown loading and chunking pipeline
+│   ├── chat/               # ChatMessage, GenerationResult, and token usage
 │   ├── providers/          # LLM abstractions, adapters, and registry
 │   ├── vectorstore/        # Chroma, NumPy, and FAISS vector stores
 │   ├── knowledge_bot.py    # Retrieval-grounded chat orchestration
-│   ├── messages.py         # Canonical ChatMessage turns
-│   ├── generation.py       # GenerationResult and token usage
 │   ├── errors.py           # Stable application-level error boundary
 │   ├── terminal.py         # Shared terminal history rendering
 │   ├── cli.py              # Flag-based CLI and chat loop

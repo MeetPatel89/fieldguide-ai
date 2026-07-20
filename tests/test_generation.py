@@ -2,7 +2,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from fieldguide_ai.generation import GenerationResult, TokenUsage
+from fieldguide_ai.chat import GenerationResult, TokenUsage
 
 
 class TokenUsageValidationTest(unittest.TestCase):

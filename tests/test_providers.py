@@ -2,9 +2,8 @@ import unittest
 from collections.abc import Sequence
 from unittest.mock import Mock
 
+from fieldguide_ai.chat import ChatMessage, GenerationResult, TokenUsage
 from fieldguide_ai.errors import ProviderGenerationError
-from fieldguide_ai.generation import GenerationResult, TokenUsage
-from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers.anthropic_provider import (
     AnthropicProvider,
     from_anthropic_response,

@@ -5,6 +5,7 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from fieldguide_ai.chat import ChatMessage, GenerationResult
 from fieldguide_ai.cli import (
     index_corpus,
     parse_args,
@@ -13,9 +14,7 @@ from fieldguide_ai.cli import (
     run_chat_loop,
 )
 from fieldguide_ai.demo import build_system_prompt
-from fieldguide_ai.generation import GenerationResult
 from fieldguide_ai.ingestion.models import DocumentChunk
-from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers.base import LLMProvider
 
 

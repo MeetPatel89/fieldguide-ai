@@ -3,8 +3,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
-from fieldguide_ai.generation import GenerationResult
-from fieldguide_ai.messages import ChatMessage
+from fieldguide_ai.chat import ChatMessage, GenerationResult
 
 
 class LLMProvider(ABC):

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
 
+from fieldguide_ai.chat import ChatMessage
 from fieldguide_ai.errors import ConfigurationError, ProviderNotFoundError
-from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.providers.anthropic_provider import AnthropicBackend
 from fieldguide_ai.providers.base import LLMProvider, ProviderBackend
 from fieldguide_ai.providers.openai_provider import OpenAIBackend

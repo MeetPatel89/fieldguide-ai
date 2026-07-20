@@ -67,8 +67,8 @@ line-ending = "lf"
 
 [tool.pyright]
 include = [
-    "fieldguide_ai/generation.py",
-    "fieldguide_ai/messages.py",
+    "fieldguide_ai/chat/generation.py",
+    "fieldguide_ai/chat/messages.py",
     "fieldguide_ai/providers",
 ]
 pythonVersion = "3.14"
@@ -76,7 +76,7 @@ typeCheckingMode = "standard"
 venv = ".venv"
 venvPath = "."
 strict = [
-    "fieldguide_ai/generation.py",
-    "fieldguide_ai/messages.py",
+    "fieldguide_ai/chat/generation.py",
+    "fieldguide_ai/chat/messages.py",
     "fieldguide_ai/providers/base.py",
 ]

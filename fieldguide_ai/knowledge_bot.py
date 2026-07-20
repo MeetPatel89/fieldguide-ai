@@ -4,9 +4,8 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from fieldguide_ai.chat import ChatMessage, GenerationResult
 from fieldguide_ai.errors import ConfigurationError
-from fieldguide_ai.generation import GenerationResult
-from fieldguide_ai.messages import ChatMessage
 from fieldguide_ai.vectorstore import VectorSearcher, VectorSearchResult
 
 

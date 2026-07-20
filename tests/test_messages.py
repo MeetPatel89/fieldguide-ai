@@ -1,6 +1,6 @@
 import unittest
 
-from fieldguide_ai.messages import ChatMessage
+from fieldguide_ai.chat import ChatMessage
 
 
 class ChatMessageTest(unittest.TestCase):

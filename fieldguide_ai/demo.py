@@ -1,6 +1,6 @@
 """Demo chat history for Fieldguide AI."""
 
-from fieldguide_ai.messages import ChatMessage
+from fieldguide_ai.chat import ChatMessage
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are a super expert in linear algebra that likes answering questions in detail."
