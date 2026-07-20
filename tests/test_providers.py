@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from fieldguide_ai.generation import GenerationResult, TokenUsage
 from fieldguide_ai.messages import ChatMessage
@@ -30,9 +30,6 @@ class FakeProvider(LLMProvider):
         self.response_text = response_text
         self.last_messages: list[ChatMessage] | None = None
         self.last_system_prompt: str | None = None
-
-    def list_models(self) -> list[str]:
-        return ["fake-model"]
 
     def generate(self, messages: list[ChatMessage]) -> GenerationResult:
         self.last_messages = list(messages)
@@ -250,8 +247,7 @@ class GenerationExtractorTest(unittest.TestCase):
 
 
 class OpenAIProviderTest(unittest.TestCase):
-    @patch("fieldguide_ai.providers.openai_provider.OpenAI")
-    def test_generate_includes_system_prompt(self, openai_type: Mock) -> None:
+    def test_generate_includes_system_prompt(self) -> None:
         response = Mock(
             output_text="Generated response",
             id="resp_123",
@@ -259,9 +255,10 @@ class OpenAIProviderTest(unittest.TestCase):
             usage=None,
             model_dump=Mock(return_value={"id": "resp_123"}),
         )
-        openai_type.return_value.responses.create.return_value = response
+        client = Mock()
+        client.responses.create.return_value = response
         provider = OpenAIProvider(
-            api_key="test-key",
+            client=client,
             model="test-model",
             system_prompt="Be concise.",
         )
@@ -273,7 +270,7 @@ class OpenAIProviderTest(unittest.TestCase):
         self.assertEqual(result.response_id, "resp_123")
         self.assertEqual(provider.last_result, result)
         self.assertEqual(provider.get_generation_log(), [result])
-        openai_type.return_value.responses.create.assert_called_once_with(
+        client.responses.create.assert_called_once_with(
             model="test-model",
             input=[
                 {"role": "system", "content": "Be concise."},
@@ -283,8 +280,7 @@ class OpenAIProviderTest(unittest.TestCase):
 
 
 class AnthropicProviderTest(unittest.TestCase):
-    @patch("fieldguide_ai.providers.anthropic_provider.Anthropic")
-    def test_generate_passes_system_separately(self, anthropic_type: Mock) -> None:
+    def test_generate_passes_system_separately(self) -> None:
         text_block = Mock(type="text", text="Generated response")
         response = Mock(
             id="msg_123",
@@ -293,9 +289,10 @@ class AnthropicProviderTest(unittest.TestCase):
             usage=Mock(input_tokens=5, output_tokens=2),
             model_dump=Mock(return_value={"id": "msg_123"}),
         )
-        anthropic_type.return_value.messages.create.return_value = response
+        client = Mock()
+        client.messages.create.return_value = response
         provider = AnthropicProvider(
-            api_key="test-key",
+            client=client,
             model="test-model",
             system_prompt="Be concise.",
         )
@@ -306,17 +303,14 @@ class AnthropicProviderTest(unittest.TestCase):
         self.assertEqual(result.provider, "anthropic")
         self.assertEqual(result.usage.total_tokens, 7)
         self.assertEqual(provider.last_result, result)
-        anthropic_type.return_value.messages.create.assert_called_once_with(
+        client.messages.create.assert_called_once_with(
             max_tokens=1000,
             model="test-model",
             messages=[{"role": "user", "content": "Hello"}],
             system="Be concise.",
         )
 
-    @patch("fieldguide_ai.providers.anthropic_provider.Anthropic")
-    def test_generate_omits_system_kwarg_when_absent(
-        self, anthropic_type: Mock
-    ) -> None:
+    def test_generate_omits_system_kwarg_when_absent(self) -> None:
         text_block = Mock(type="text", text="Hi")
         response = Mock(
             id="msg_456",
@@ -325,12 +319,13 @@ class AnthropicProviderTest(unittest.TestCase):
             usage=Mock(input_tokens=1, output_tokens=1),
             model_dump=Mock(return_value={}),
         )
-        anthropic_type.return_value.messages.create.return_value = response
-        provider = AnthropicProvider(api_key="test-key", model="test-model")
+        client = Mock()
+        client.messages.create.return_value = response
+        provider = AnthropicProvider(client=client, model="test-model")
 
         provider.generate([ChatMessage(role="user", content="Hello")])
 
-        anthropic_type.return_value.messages.create.assert_called_once_with(
+        client.messages.create.assert_called_once_with(
             max_tokens=1000,
             model="test-model",
             messages=[{"role": "user", "content": "Hello"}],

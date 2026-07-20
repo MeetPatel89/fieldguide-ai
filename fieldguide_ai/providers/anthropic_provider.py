@@ -1,5 +1,6 @@
 """Anthropic provider for the Fieldguide AI."""
 
+import os
 import time
 from typing import Any
 
@@ -8,7 +9,7 @@ from anthropic.types import Message
 
 from fieldguide_ai.generation import GenerationResult, TokenUsage
 from fieldguide_ai.messages import ChatMessage
-from fieldguide_ai.providers.base import LLMProvider
+from fieldguide_ai.providers.base import LLMProvider, ProviderBackend
 
 
 def to_anthropic_messages(messages: list[ChatMessage]) -> list[dict[str, Any]]:
@@ -61,20 +62,17 @@ class AnthropicProvider(LLMProvider):
 
     def __init__(
         self,
-        api_key: str | None,
+        client: Anthropic,
         model: str,
         message_history: list[ChatMessage] | None = None,
         system_prompt: str | None = None,
     ) -> None:
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY is not set. Add it to your .env file.")
-
         super().__init__(
             message_history=message_history,
             system_prompt=system_prompt,
         )
         self.model = model
-        self.client = Anthropic(api_key=api_key)
+        self.client = client
 
     def generate(self, messages: list[ChatMessage]) -> GenerationResult:
         """Generate a response from the model."""
@@ -97,23 +95,34 @@ class AnthropicProvider(LLMProvider):
             )
         )
 
+
+class AnthropicBackend(ProviderBackend):
+    """Own Anthropic SDK-client creation, discovery, and chat construction."""
+
+    def _build_client(self) -> Anthropic:
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY is not set. Add it to your .env file.")
+        return Anthropic(api_key=api_key)
+
+    def build_provider(self, model: str) -> LLMProvider:
+        """Build an Anthropic chat provider for a model."""
+        return AnthropicProvider(client=self._build_client(), model=model)
+
     def list_models(self) -> list[str]:
-        """List available models."""
-        return sorted(model.id for model in self.client.models.list().data)
+        """List models visible to the configured Anthropic account."""
+        client = self._build_client()
+        return sorted(model.id for model in client.models.list().data)
 
 
 def main() -> None:
     """Run the main function."""
-    import os
-
     from dotenv import load_dotenv
 
     load_dotenv()
-    provider = AnthropicProvider(
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
-        model="claude-haiku-4-5-20251001",
-        system_prompt="Answer briefly.",
-    )
+    backend = AnthropicBackend()
+    provider = backend.build_provider("claude-haiku-4-5-20251001")
+    provider.system_prompt = "Answer briefly."
     result = provider.generate(
         [
             ChatMessage(
@@ -123,7 +132,7 @@ def main() -> None:
         ]
     )
     print(result.text)
-    print(provider.list_models())
+    print(backend.list_models())
 
 
 if __name__ == "__main__":

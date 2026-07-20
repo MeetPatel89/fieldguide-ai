@@ -16,6 +16,7 @@ from fieldguide_ai.ingestion import (
     MarkdownSectionChunker,
     load_markdown_documents,
 )
+from fieldguide_ai.knowledge_bot import KnowledgeBot
 from fieldguide_ai.providers import (
     LLMProvider,
     OpenAIProvider,
@@ -27,8 +28,10 @@ from fieldguide_ai.providers import (
 from fieldguide_ai.vectorstore import (
     DEFAULT_COLLECTION_NAME,
     DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_FAISS_PATH,
     ChromaVectorStore,
     EmbeddingProvider,
+    FaissVectorStore,
     NumpyVectorStore,
     OpenAIEmbeddingProvider,
     VectorStore,
@@ -66,6 +69,11 @@ def build_vector_store(
             path=path or DEFAULT_NUMPY_PATH,
             embedding_provider=embedding_provider,
         )
+    if provider_name == "faiss":
+        return FaissVectorStore(
+            path=path or DEFAULT_FAISS_PATH,
+            embedding_provider=embedding_provider,
+        )
     raise ValueError(f"unsupported vector store provider: {provider_name}")
 
 
@@ -81,14 +89,17 @@ def run_chat_loop(
     input_stream: TextIO = sys.stdin,
     output_stream: TextIO = sys.stdout,
     system_prompt: str | None = None,
+    vector_store: VectorStore | None = None,
+    top_k: int = 5,
 ) -> None:
-    """Run an interactive, stateful chat session."""
+    """Run an interactive, stateful chat session with optional retrieval."""
     provider.system_prompt = (
         build_system_prompt() if system_prompt is None else system_prompt
     )
     output_stream.write(
         "Stateful chat started. Type :quit to exit, :history to inspect state.\n"
     )
+    bot = KnowledgeBot(provider, vector_store)
 
     while True:
         output_stream.write("\nYou> ")
@@ -117,8 +128,16 @@ def run_chat_loop(
             output_stream.write("History cleared.\n")
             continue
 
-        response_text = provider.chat(user_input)
-        output_stream.write(f"\nAssistant> {response_text}\n")
+        response = bot.ask(user_input, top_k=top_k)
+        output_stream.write(f"\nAssistant> {response.answer}\n")
+        if response.sources:
+            output_stream.write("Sources:\n")
+            for source in response.sources:
+                path = source.metadata.get("source_path", "unknown")
+                section = source.metadata.get("section_path") or source.metadata.get(
+                    "section_title", "unknown"
+                )
+                output_stream.write(f"- {path} — {section}\n")
 
 
 def print_history(provider: LLMProvider, output_stream: TextIO = sys.stdout) -> None:
@@ -187,6 +206,20 @@ def _parse_bool(value: str) -> bool:
     raise argparse.ArgumentTypeError(f"expected true or false, got {value!r}")
 
 
+def _parse_positive_integer(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"expected a positive whole number, got {value!r}"
+        ) from None
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(
+            f"expected a positive whole number, got {value!r}"
+        )
+    return parsed
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -236,13 +269,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--vector-store",
-        choices=("chroma", "numpy"),
+        choices=("chroma", "numpy", "faiss", "none"),
         default="chroma",
-        help="Vector store used by --index-corpus. Defaults to chroma.",
+        help="Vector store used for indexing and chat. Use none for plain chat.",
     )
     parser.add_argument(
         "--store-path",
-        help="Storage directory for Chroma or .npz path for NumPy.",
+        help="Storage path for Chroma, NumPy (.npz), or FAISS (file prefix).",
     )
     parser.add_argument(
         "--collection-name",
@@ -253,6 +286,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--embedding-model",
         default=DEFAULT_EMBEDDING_MODEL,
         help=f"OpenAI embedding model. Defaults to {DEFAULT_EMBEDDING_MODEL}.",
+    )
+    parser.add_argument(
+        "--top-k",
+        type=_parse_positive_integer,
+        default=5,
+        help="Number of chunks retrieved for each chat question. Defaults to 5.",
     )
     return parser.parse_args(argv)
 
@@ -272,6 +311,9 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.index_corpus:
+        if args.vector_store == "none":
+            parser_error = "--vector-store none cannot be used with --index-corpus"
+            raise ValueError(parser_error)
         embedding_provider = OpenAIEmbeddingProvider(
             api_key=os.getenv("OPENAI_API_KEY"),
             model=args.embedding_model,
@@ -295,7 +337,19 @@ def main(argv: list[str] | None = None) -> None:
         run_demo(provider)
         return
 
-    run_chat_loop(provider)
+    vector_store = None
+    if args.vector_store != "none":
+        embedding_provider = OpenAIEmbeddingProvider(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model=args.embedding_model,
+        )
+        vector_store = build_vector_store(
+            provider_name=args.vector_store,
+            embedding_provider=embedding_provider,
+            path=args.store_path,
+            collection_name=args.collection_name,
+        )
+    run_chat_loop(provider, vector_store=vector_store, top_k=args.top_k)
 
 
 def _preview_text(text: str, max_chars: int = 240) -> str:

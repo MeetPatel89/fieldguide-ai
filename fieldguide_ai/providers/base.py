@@ -22,10 +22,6 @@ class LLMProvider(ABC):
     def generate(self, messages: list[ChatMessage]) -> GenerationResult:
         """Return normalized model output for conversation turns."""
 
-    @abstractmethod
-    def list_models(self) -> list[str]:
-        """List available models."""
-
     def add_message(self, message: ChatMessage) -> None:
         """Add a message to the conversation history."""
         self.message_history.append(message)
@@ -70,3 +66,15 @@ class LLMProvider(ABC):
         self.add_message(ChatMessage(role="assistant", content=result.text))
 
         return result.text
+
+
+class ProviderBackend(ABC):
+    """Provider integration responsible for SDK access and chat construction."""
+
+    @abstractmethod
+    def build_provider(self, model: str) -> LLMProvider:
+        """Build a chat provider configured for a model."""
+
+    @abstractmethod
+    def list_models(self) -> list[str]:
+        """List models available through the provider SDK."""

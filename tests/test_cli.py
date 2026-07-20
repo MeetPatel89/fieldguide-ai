@@ -1,6 +1,7 @@
 import io
 import unittest
 from collections.abc import Sequence
+from contextlib import redirect_stderr
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -19,9 +20,6 @@ from fieldguide_ai.providers.base import LLMProvider
 
 
 class FakeProvider(LLMProvider):
-    def list_models(self) -> list[str]:
-        return ["fake-model"]
-
     def generate(self, messages: list[ChatMessage]) -> GenerationResult:
         user_messages = [
             message.content for message in messages if message.role == "user"
@@ -166,3 +164,25 @@ class CliTest(unittest.TestCase):
         self.assertEqual(args.index_corpus, "docs")
         self.assertEqual(args.vector_store, "numpy")
         self.assertEqual(args.store_path, "custom.npz")
+
+    def test_parses_faiss_and_retrieval_configuration(self) -> None:
+        args = parse_args(
+            [
+                "--index-corpus",
+                "docs",
+                "--vector-store",
+                "faiss",
+                "--store-path",
+                "custom-index",
+                "--top-k",
+                "7",
+            ]
+        )
+
+        self.assertEqual(args.vector_store, "faiss")
+        self.assertEqual(args.store_path, "custom-index")
+        self.assertEqual(args.top_k, 7)
+
+    def test_rejects_non_positive_retrieval_count(self) -> None:
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parse_args(["--top-k", "0"])

@@ -293,3 +293,21 @@ def _split_words_with_prefix(
     body_overlap_words = min(overlap_words, max(0, body_max_words - 1))
     body_chunks = _split_words(text, body_max_words, body_overlap_words)
     return [f"{prefix}\n\n{chunk}" for chunk in body_chunks]
+
+
+if __name__ == "__main__":
+    from pathlib import Path
+
+    from fieldguide_ai.ingestion.loader import load_markdown_document
+
+    file_path = (
+        f"{Path(__file__).parent.parent.parent}/data/corpora/nautilus/raw/"
+        "tasks/prb-202-problem-tasks.md"
+    )
+    document = load_markdown_document(file_path)
+    chunker = MarkdownSectionChunker()
+    chunks = chunker.chunk_document(document)
+    for chunk in chunks:
+        print("--------------------------------")
+        print(chunk)
+        print("--------------------------------")
