@@ -15,7 +15,6 @@ from rich.table import Table
 from rich.text import Text
 
 from fieldguide_ai.chat import ChatMessage
-from fieldguide_ai.demo import build_system_prompt
 from fieldguide_ai.errors import ConfigurationError, FieldguideError
 from fieldguide_ai.ingestion import (
     DocumentIndexingPipeline,
@@ -54,6 +53,13 @@ CHAT_COMMANDS = (
     ":history",
     ":clear",
     ":quit",
+)
+
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a domain expert in incident reports for Nautilus Financial Services. "
+    "You are capable of answering user queries about issues/incidents for Nautilus "
+    "Financial Services without making up stuff or referring to external knowledge "
+    "not strictly within company corpus."
 )
 
 
@@ -381,7 +387,7 @@ def run_chat_loop(
         config = SessionConfig(
             system_prompt=system_prompt
             or provider.system_prompt
-            or build_system_prompt(),
+            or DEFAULT_SYSTEM_PROMPT,
             store_type=None,
             store_path=None,
         )
@@ -515,7 +521,7 @@ def run_wizard(
         return False
     store_type, store_path, collection_name = store_selection
     system_prompt = _ask_text(
-        questionary.text("System prompt:", default=build_system_prompt())
+        questionary.text("System prompt:", default=DEFAULT_SYSTEM_PROMPT)
     )
     if system_prompt is None:
         return False

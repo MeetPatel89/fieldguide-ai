@@ -53,7 +53,6 @@ def from_openai_response(
         )
 
     raw = response.model_dump(mode="json")
-
     return GenerationResult(
         text=getattr(response, "output_text", None) or "",
         provider="openai",

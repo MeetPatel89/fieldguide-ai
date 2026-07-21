@@ -161,3 +161,17 @@ def build_provider(
 ) -> LLMProvider:
     """Construct a provider from an explicit or freshly composed registry."""
     return get_provider(name, registry).build_provider(model)
+
+
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    spec = ProviderSpec(
+        name="openai",
+        label="OpenAI",
+        models=("gpt-5-nano", "gpt-5-mini", "gpt-4o-mini"),
+        default_model=OPENAI_DEFAULT_MODEL,
+        backend=OpenAIBackend(api_key=os.getenv("OPENAI_API_KEY")),
+    )
+    spec.available_models()
