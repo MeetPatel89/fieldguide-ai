@@ -1,8 +1,10 @@
 """Chroma-backed vector-store implementation."""
 
 from collections.abc import Sequence
+from datetime import datetime
 
 import chromadb
+import numpy as np
 from chromadb.api import ClientAPI
 
 from fieldguide_ai.errors import VectorStoreOperationError
@@ -16,7 +18,7 @@ from fieldguide_ai.vectorstore.base import (
 from fieldguide_ai.vectorstore.metadata import serialize_chunk_metadata
 
 DEFAULT_COLLECTION_NAME = "documents"
-DEFAULT_CHROMA_PATH = "chroma_db"
+DEFAULT_CHROMA_PATH = "data/chroma_db"
 
 
 class ChromaVectorStore(VectorStore):
@@ -27,6 +29,7 @@ class ChromaVectorStore(VectorStore):
         path: str,
         embedding_provider: EmbeddingProvider,
         collection_name: str = DEFAULT_COLLECTION_NAME,
+        collection_description: str = "",
         client: ClientAPI | None = None,
     ) -> None:
         self._embedding_provider = embedding_provider
@@ -35,7 +38,11 @@ class ChromaVectorStore(VectorStore):
                 client if client is not None else chromadb.PersistentClient(path=path)
             )
             self._collection = self._client.get_or_create_collection(
-                name=collection_name
+                name=collection_name,
+                metadata={
+                    "description": collection_description,
+                    "created_at": datetime.now().isoformat(),
+                },
             )
         except Exception as error:
             raise VectorStoreOperationError(
@@ -76,9 +83,10 @@ class ChromaVectorStore(VectorStore):
 
         query_embeddings = self._embedding_provider.embed_texts([query_text])
         validate_embeddings(query_embeddings, 1)
+        query_embedding = np.asarray(query_embeddings[0], dtype=np.float32)
         try:
             response = self._collection.query(
-                query_embeddings=query_embeddings,
+                query_embeddings=query_embedding,
                 n_results=n_results,
                 include=["documents", "metadatas", "distances"],
             )

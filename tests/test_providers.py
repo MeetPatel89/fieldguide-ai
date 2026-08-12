@@ -1,20 +1,24 @@
 import unittest
-from collections.abc import Sequence
-from unittest.mock import Mock
+from collections.abc import AsyncIterator, Callable, Sequence
+
+from model_runtime import (
+    ChatModel,
+    FinishReason,
+    Message,
+    ModelCapabilities,
+    ModelRequest,
+    ModelResponse,
+    ModelRouter,
+    ModelRuntime,
+    ProviderUnavailableError,
+    StreamEvent,
+    Usage,
+)
 
 from fieldguide_ai.chat import ChatMessage, GenerationResult, TokenUsage
-from fieldguide_ai.errors import ProviderGenerationError
-from fieldguide_ai.providers.anthropic_provider import (
-    AnthropicProvider,
-    from_anthropic_response,
-    to_anthropic_messages,
-)
+from fieldguide_ai.errors import ConfigurationError, ProviderGenerationError
 from fieldguide_ai.providers.base import LLMProvider
-from fieldguide_ai.providers.openai_provider import (
-    OpenAIProvider,
-    from_openai_response,
-    to_openai_input,
-)
+from fieldguide_ai.providers.runtime_provider import ModelRuntimeProvider
 
 
 class FakeProvider(LLMProvider):
@@ -182,198 +186,130 @@ class ProviderHistoryTest(unittest.TestCase):
         )
 
 
-class MessageAdapterTest(unittest.TestCase):
-    def test_to_openai_input_prepends_system_prompt(self) -> None:
-        messages = [ChatMessage(role="user", content="Hello")]
+class FakeChatModel(ChatModel):
+    def __init__(
+        self,
+        response: ModelResponse | None = None,
+        error: ProviderUnavailableError | None = None,
+    ) -> None:
+        self._response = response
+        self._error = error
+        self.requests: list[tuple[str, ModelRequest]] = []
 
-        self.assertEqual(
-            to_openai_input(messages, system_prompt="Be concise."),
-            [
-                {"role": "system", "content": "Be concise."},
-                {"role": "user", "content": "Hello"},
-            ],
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(streaming=False)
+
+    async def complete(self, model_id: str, request: ModelRequest) -> ModelResponse:
+        self.requests.append((model_id, request))
+        if self._error is not None:
+            raise self._error
+        assert self._response is not None
+        return self._response
+
+    async def stream(
+        self, model_id: str, request: ModelRequest
+    ) -> AsyncIterator[StreamEvent]:
+        raise NotImplementedError
+        yield
+
+
+def build_runtime_provider(
+    adapter: ChatModel,
+    *,
+    system_prompt: str | None = None,
+    clock: Callable[[], float] | None = None,
+) -> ModelRuntimeProvider:
+    runtime = ModelRuntime(ModelRouter({"primary": (adapter, "test-model")}))
+    return ModelRuntimeProvider(
+        runtime=runtime,
+        logical_name="primary",
+        provider_name="fake",
+        model="test-model",
+        system_prompt=system_prompt,
+        clock=clock,
+    )
+
+
+class ModelRuntimeProviderTest(unittest.TestCase):
+    def test_generate_maps_request_response_and_records_result(self) -> None:
+        response = ModelResponse(
+            message=Message.assistant("Generated response"),
+            usage=Usage(input_tokens=10, output_tokens=4),
+            finish_reason=FinishReason.STOP,
+            raw={"id": "resp_123", "kind": "response"},
+            model="returned-model",
         )
-
-    def test_to_openai_input_omits_system_when_absent(self) -> None:
-        messages = [ChatMessage(role="user", content="Hello")]
-
-        self.assertEqual(
-            to_openai_input(messages),
-            [{"role": "user", "content": "Hello"}],
-        )
-
-    def test_to_anthropic_messages_maps_conversation_turns(self) -> None:
-        messages = [
-            ChatMessage(role="user", content="Hello"),
-            ChatMessage(role="assistant", content="Hi"),
-        ]
-
-        self.assertEqual(
-            to_anthropic_messages(messages),
-            [
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi"},
-            ],
-        )
-
-
-class GenerationExtractorTest(unittest.TestCase):
-    def test_from_openai_response_normalizes_metadata(self) -> None:
-        response = Mock(
-            output_text="Generated response",
-            id="resp_123",
-            status="completed",
-            usage=Mock(input_tokens=10, output_tokens=4, total_tokens=14),
-            model_dump=Mock(return_value={"id": "resp_123"}),
-        )
-
-        result = from_openai_response(response, model="test-model", latency_ms=12.5)
-
-        self.assertEqual(
-            result,
-            GenerationResult(
-                text="Generated response",
-                provider="openai",
-                model="test-model",
-                response_id="resp_123",
-                finish_reason="completed",
-                usage=TokenUsage(input_tokens=10, output_tokens=4, total_tokens=14),
-                latency_ms=12.5,
-                raw={"id": "resp_123"},
-            ),
-        )
-
-    def test_from_anthropic_response_normalizes_metadata(self) -> None:
-        response = Mock(
-            id="msg_123",
-            stop_reason="end_turn",
-            content=[Mock(type="text", text="Generated response")],
-            usage=Mock(input_tokens=8, output_tokens=3),
-            model_dump=Mock(return_value={"id": "msg_123"}),
-        )
-
-        result = from_anthropic_response(response, model="test-model", latency_ms=9.0)
-
-        self.assertEqual(
-            result,
-            GenerationResult(
-                text="Generated response",
-                provider="anthropic",
-                model="test-model",
-                response_id="msg_123",
-                finish_reason="end_turn",
-                usage=TokenUsage(input_tokens=8, output_tokens=3, total_tokens=11),
-                latency_ms=9.0,
-                raw={"id": "msg_123"},
-            ),
-        )
-
-
-class OpenAIProviderTest(unittest.TestCase):
-    def test_generate_includes_system_prompt(self) -> None:
-        response = Mock(
-            output_text="Generated response",
-            id="resp_123",
-            status="completed",
-            usage=None,
-            model_dump=Mock(return_value={"id": "resp_123"}),
-        )
-        client = Mock()
-        client.responses.create.return_value = response
-        provider = OpenAIProvider(
-            client=client,
-            model="test-model",
+        adapter = FakeChatModel(response=response)
+        ticks = iter((0.0, 0.0125))
+        provider = build_runtime_provider(
+            adapter,
             system_prompt="Be concise.",
+            clock=lambda: next(ticks),
         )
 
-        result = provider.generate([ChatMessage(role="user", content="Hello")])
+        result = provider.generate(
+            [
+                ChatMessage(role="user", content="Hello"),
+                ChatMessage(role="assistant", content="Hi"),
+            ]
+        )
 
-        self.assertEqual(result.text, "Generated response")
-        self.assertEqual(result.provider, "openai")
-        self.assertEqual(result.response_id, "resp_123")
+        self.assertEqual(
+            result,
+            GenerationResult(
+                text="Generated response",
+                provider="fake",
+                model="returned-model",
+                response_id="resp_123",
+                finish_reason="stop",
+                usage=TokenUsage(
+                    input_tokens=10,
+                    output_tokens=4,
+                    total_tokens=14,
+                ),
+                latency_ms=12.5,
+                raw={"id": "resp_123", "kind": "response"},
+            ),
+        )
         self.assertEqual(provider.last_result, result)
         self.assertEqual(provider.get_generation_log(), [result])
-        client.responses.create.assert_called_once_with(
-            model="test-model",
-            input=[
-                {"role": "system", "content": "Be concise."},
-                {"role": "user", "content": "Hello"},
-            ],
+        model_id, request = adapter.requests[0]
+        self.assertEqual(model_id, "test-model")
+        self.assertEqual(
+            request.messages,
+            (
+                Message.system("Be concise."),
+                Message.user("Hello"),
+                Message.assistant("Hi"),
+            ),
         )
 
-    def test_generate_translates_sdk_errors_and_preserves_context(self) -> None:
-        client = Mock()
-        sdk_error = ConnectionError("network unavailable")
-        client.responses.create.side_effect = sdk_error
-        provider = OpenAIProvider(client=client, model="test-model")
+    def test_generate_wraps_runtime_errors_and_preserves_context(self) -> None:
+        runtime_error = ProviderUnavailableError(
+            "network unavailable",
+            retryable=False,
+            provider="test-model",
+        )
+        provider = build_runtime_provider(FakeChatModel(error=runtime_error))
 
         with self.assertRaises(ProviderGenerationError) as raised:
             provider.chat("Hello")
 
-        self.assertIs(raised.exception.__cause__, sdk_error)
+        self.assertIs(raised.exception.__cause__, runtime_error)
         self.assertEqual(provider.get_history(), [])
+        self.assertEqual(provider.get_generation_log(), [])
 
-
-class AnthropicProviderTest(unittest.TestCase):
-    def test_generate_passes_system_separately(self) -> None:
-        text_block = Mock(type="text", text="Generated response")
-        response = Mock(
-            id="msg_123",
-            stop_reason="end_turn",
-            content=[text_block],
-            usage=Mock(input_tokens=5, output_tokens=2),
-            model_dump=Mock(return_value={"id": "msg_123"}),
+    def test_rejects_blank_model(self) -> None:
+        adapter = FakeChatModel(
+            response=ModelResponse(message=Message.assistant("unused"))
         )
-        client = Mock()
-        client.messages.create.return_value = response
-        provider = AnthropicProvider(
-            client=client,
-            model="test-model",
-            system_prompt="Be concise.",
-        )
+        runtime = ModelRuntime(ModelRouter({"primary": (adapter, "test-model")}))
 
-        result = provider.generate([ChatMessage(role="user", content="Hello")])
-
-        self.assertEqual(result.text, "Generated response")
-        self.assertEqual(result.provider, "anthropic")
-        self.assertEqual(result.usage.total_tokens, 7)
-        self.assertEqual(provider.last_result, result)
-        client.messages.create.assert_called_once_with(
-            max_tokens=1000,
-            model="test-model",
-            messages=[{"role": "user", "content": "Hello"}],
-            system="Be concise.",
-        )
-
-    def test_generate_omits_system_kwarg_when_absent(self) -> None:
-        text_block = Mock(type="text", text="Hi")
-        response = Mock(
-            id="msg_456",
-            stop_reason="end_turn",
-            content=[text_block],
-            usage=Mock(input_tokens=1, output_tokens=1),
-            model_dump=Mock(return_value={}),
-        )
-        client = Mock()
-        client.messages.create.return_value = response
-        provider = AnthropicProvider(client=client, model="test-model")
-
-        provider.generate([ChatMessage(role="user", content="Hello")])
-
-        client.messages.create.assert_called_once_with(
-            max_tokens=1000,
-            model="test-model",
-            messages=[{"role": "user", "content": "Hello"}],
-        )
-
-    def test_generate_translates_sdk_errors_and_preserves_context(self) -> None:
-        client = Mock()
-        sdk_error = ConnectionError("network unavailable")
-        client.messages.create.side_effect = sdk_error
-        provider = AnthropicProvider(client=client, model="test-model")
-
-        with self.assertRaises(ProviderGenerationError) as raised:
-            provider.chat("Hello")
-
-        self.assertIs(raised.exception.__cause__, sdk_error)
-        self.assertEqual(provider.get_history(), [])
+        with self.assertRaisesRegex(ConfigurationError, "model must not be blank"):
+            ModelRuntimeProvider(
+                runtime=runtime,
+                logical_name="primary",
+                provider_name="fake",
+                model=" ",
+            )

@@ -55,7 +55,7 @@ class KnowledgeBotTest(unittest.TestCase):
         response = KnowledgeBot(provider, store).ask("When should I escalate?", top_k=3)
 
         self.assertEqual(response.answer, "Grounded answer")
-        self.assertEqual(response.sources, [source])
+        self.assertEqual(response.sources, (source,))
         self.assertEqual(store.queries, [("When should I escalate?", 3)])
         self.assertIn("docs/runbook.md", provider.generated_messages[-1].content)
         self.assertIn("severity two", provider.generated_messages[-1].content)
@@ -73,7 +73,7 @@ class KnowledgeBotTest(unittest.TestCase):
         answer, sources = KnowledgeBot(provider).ask("Hello")
 
         self.assertEqual(answer, "Grounded answer")
-        self.assertEqual(sources, [])
+        self.assertEqual(sources, ())
         self.assertEqual(
             provider.generated_messages, [ChatMessage(role="user", content="Hello")]
         )

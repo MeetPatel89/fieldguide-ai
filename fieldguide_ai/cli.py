@@ -20,7 +20,7 @@ from fieldguide_ai.ingestion import (
 from fieldguide_ai.knowledge_bot import KnowledgeBot
 from fieldguide_ai.providers import (
     LLMProvider,
-    OpenAIProvider,
+    ModelRuntimeProvider,
     ProviderRegistry,
     registry_from_environment,
 )
@@ -47,11 +47,13 @@ EXIT_COMMANDS = {":exit", ":q", ":quit", "exit", "quit"}
 def build_provider(
     model: str,
     registry: ProviderRegistry | None = None,
-) -> OpenAIProvider:
+) -> ModelRuntimeProvider:
     """Build the registered OpenAI provider for a model."""
     provider = build_registered_provider("openai", model, registry)
-    if not isinstance(provider, OpenAIProvider):
-        raise TypeError("the openai registry entry did not create an OpenAIProvider")
+    if not isinstance(provider, ModelRuntimeProvider):
+        raise TypeError(
+            "the openai registry entry did not create a ModelRuntimeProvider"
+        )
     return provider
 
 

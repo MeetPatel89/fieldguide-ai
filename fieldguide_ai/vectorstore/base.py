@@ -1,44 +1,40 @@
 """Provider-neutral vector-store interfaces and validation."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
-from copy import deepcopy
 from dataclasses import dataclass, field
 from math import isfinite
-from typing import Any, Protocol
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Protocol
 
-from fieldguide_ai.ingestion.models import DocumentChunk
+if TYPE_CHECKING:
+    from fieldguide_ai.ingestion.models import DocumentChunk
+
+VectorMetadataValue = str | int | float | bool | None
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True, slots=True)
 class VectorSearchResult:
     """A provider-neutral vector search result."""
 
     chunk_id: str
     content: str
-    _metadata: dict[str, Any] = field(repr=False)
+    metadata: Mapping[str, VectorMetadataValue] = field(repr=False)
     distance: float
 
-    def __init__(
-        self,
-        chunk_id: str,
-        content: str,
-        metadata: Mapping[str, Any],
-        distance: float,
-    ) -> None:
-        if not chunk_id.strip():
+    def __post_init__(self) -> None:
+        """Validate the search result."""
+        if not self.chunk_id.strip():
             raise ValueError("search-result chunk_id must not be blank")
-        if not isfinite(distance) or distance < 0:
+        if not isfinite(self.distance) or self.distance < 0:
             raise ValueError("search-result distance must be finite and non-negative")
-        object.__setattr__(self, "chunk_id", chunk_id)
-        object.__setattr__(self, "content", content)
-        object.__setattr__(self, "_metadata", deepcopy(dict(metadata)))
-        object.__setattr__(self, "distance", distance)
-
-    @property
-    def metadata(self) -> dict[str, Any]:
-        """An independent copy of result metadata."""
-        return deepcopy(self._metadata)
+        object.__setattr__(
+            self,
+            "metadata",
+            MappingProxyType(dict(self.metadata)),
+        )
 
 
 class EmbeddingProvider(ABC):

@@ -1,7 +1,7 @@
 """Retrieval-grounded chat orchestration."""
 
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Protocol
 
 from fieldguide_ai.chat import ChatMessage, GenerationResult
@@ -26,23 +26,14 @@ class ChatSession(Protocol):
         ...
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class KnowledgeAnswer:
     """An assistant answer and the source chunks used to produce it."""
 
     answer: str
-    _sources: tuple[VectorSearchResult, ...] = field(repr=False)
+    sources: tuple[VectorSearchResult, ...]
 
-    def __init__(self, answer: str, sources: Sequence[VectorSearchResult]) -> None:
-        object.__setattr__(self, "answer", answer)
-        object.__setattr__(self, "_sources", tuple(sources))
-
-    @property
-    def sources(self) -> list[VectorSearchResult]:
-        """A copy of the retrieval sources in ranking order."""
-        return list(self._sources)
-
-    def __iter__(self) -> Iterator[str | list[VectorSearchResult]]:
+    def __iter__(self) -> Iterator[str | tuple[VectorSearchResult, ...]]:
         """Allow callers to unpack the answer and sources as a pair."""
         yield self.answer
         yield self.sources
@@ -78,7 +69,7 @@ class KnowledgeBot:
                 content=augmented_question,
             ),
         )
-        return KnowledgeAnswer(result.text, sources)
+        return KnowledgeAnswer(result.text, tuple(sources))
 
 
 def _build_augmented_question(

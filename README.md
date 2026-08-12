@@ -56,7 +56,7 @@ Operational knowledge often lives across runbooks, policies, product documentati
 
 Loading, chunking, validation, persistence, and dataframe operations are deterministic and remain ordinary Python pipelines. A model is useful where the user asks open-ended questions, conversational context must be maintained, or the appropriate dataframe tool and arguments must be selected dynamically.
 
-The project does not treat every step as agentic. Deterministic work stays explicit and testable; model-driven work is isolated behind provider and tool interfaces. Provider SDK clients, credentials, vector stores, and filesystem loading enter through explicit composition boundaries so core conversation and indexing behavior can be tested without network or disk access.
+The project does not treat every step as agentic. Deterministic work stays explicit and testable; model-driven work is isolated behind provider and tool interfaces. The shared `model-runtime` package owns asynchronous OpenAI and Anthropic chat calls, routing, retries, timeouts, and usage accounting; Fieldguide bridges it behind a synchronous conversation boundary. Credentials, vector stores, and filesystem loading enter through explicit composition boundaries so core conversation and indexing behavior can be tested without network or disk access.
 
 ## Usage
 
@@ -174,7 +174,7 @@ This entry point expects the local CSV corpus to exist. It is separate from the 
 ```text
 User
   |
-  +-- rich/questionary wizard ---> provider registry --> OpenAI / Anthropic
+  +-- rich/questionary wizard ---> provider registry --> model-runtime --> OpenAI / Anthropic
   |          |
   |          +--> Markdown ingestion and retrieval
   |                    |
@@ -189,11 +189,12 @@ User
 
 | Component | Responsibility |
 | --- | --- |
-| `fieldguide_ai/interactive.py` | Rich guided configuration, immutable validated session settings, sourced chat, and live session commands. |
+| `fieldguide_ai/config/` | Immutable, validated session settings and their default system prompt. |
+| `fieldguide_ai/interactive.py` | Rich guided configuration, sourced chat, and live session commands. |
 | `fieldguide_ai/knowledge_bot.py` | Optional retrieval through a focused search boundary, prompt augmentation, raw history preservation, and sourced answers. |
 | `fieldguide_ai/cli.py` | Flag-based commands, indexing orchestration, and retrieval-capable chat loop. |
 | `fieldguide_ai/chat/` | Provider-agnostic chat communication objects: immutable `ChatMessage` turns plus normalized `GenerationResult` and token usage models. |
-| `fieldguide_ai/providers/` | Stateful conversation abstraction, immutable registry, SDK adapters, explicit backend dependencies, and normalized provider errors. |
+| `fieldguide_ai/providers/` | Stateful synchronous conversation abstraction, immutable registry, model-runtime bridge, direct SDK model discovery, and normalized provider errors. |
 | `fieldguide_ai/ingestion/` | Markdown loading, frontmatter parsing, section chunking, and document replacement through a focused index boundary. |
 | `fieldguide_ai/vectorstore/` | Focused search/index interfaces, composition factory, embedding abstraction, and Chroma/NumPy/FAISS persistence. |
 | `fieldguide_ai/errors.py` | Application-level configuration, provider, embedding, document-loading, and vector-store exceptions. |
@@ -279,7 +280,7 @@ Tests cover validated and defensive value objects, atomic message history, provi
 - The NumPy store is intended for small local indexes; it loads records into memory for search.
 - The dataframe demo depends on a fixed local CSV directory and is not integrated with the primary CLI.
 - Formal quality, latency, cost, groundedness, and human-intervention benchmarks have not been established.
-- Retry policies, production observability, and model-output validation are not yet implemented.
+- Production observability and model-output validation are not yet implemented.
 
 ## Evaluation strategy
 
@@ -300,9 +301,15 @@ Do not interpret passing unit tests as evidence of answer quality or production 
 ```text
 .
 ├── .cursor/rules/          # Project rules, including README maintenance
+├── data/corpora/nautilus/  # Synthetic ITSM Markdown corpus plus CSV demos
+│   ├── source_of_truth/    # facts.yaml consistency contract (payments stack, KIs, routing)
+│   ├── manifests/          # document_manifest_v0.yaml (history) and document_manifest_v2.yaml
+│   ├── raw/                # Ingestible Markdown: incidents, changes, runbooks, SOPs, etc.
+│   └── misc/               # CSV files used by the dataframe agent demo
 ├── fieldguide_ai/
 │   ├── ingestion/          # Markdown loading and chunking pipeline
 │   ├── chat/               # ChatMessage, GenerationResult, and token usage
+│   ├── config/             # Validated interactive session configuration
 │   ├── providers/          # LLM abstractions, adapters, and registry
 │   ├── vectorstore/        # Chroma, NumPy, and FAISS vector stores
 │   ├── knowledge_bot.py    # Retrieval-grounded chat orchestration
@@ -311,15 +318,26 @@ Do not interpret passing unit tests as evidence of answer quality or production 
 │   ├── cli.py              # Flag-based CLI and chat loop
 │   └── interactive.py      # Rich questionary wizard and chat loop
 ├── langchain_pandas/       # Dataframe agent catalog and tools
+├── notebooks/              # Exploratory scripts and notebooks
+│   └── explore.py          # Concurrent OpenAI/Anthropic model-runtime demo
 ├── tests/                  # unittest suite
 ├── langchain_main.py       # CSV dataframe agent entry point
 ├── main.py                 # Flag-based CLI entry point
 └── pyproject.toml          # Package metadata and dependencies
 ```
 
+To see Fieldguide's sync provider boundary versus true `asyncio.gather` overlap across OpenAI and Anthropic network calls:
+
+```bash
+uv run python notebooks/explore.py
+```
+
+
+The Nautilus ITSM corpus (`data/corpora/nautilus`) is synthetic enterprise support documentation for retrieval and future agentic triage experiments. Payments Reporting is modeled as a simplified inspectable pipeline: Payments Platform feed → Azure SQL staging → Databricks transform → Azure SQL reporting → Power BI, with ordered freshness checkpoints and multiple failure-mode incident clusters. Authoritative constraints live in `source_of_truth/facts.yaml`; the final document inventory is `manifests/document_manifest_v2.yaml`. Runtime ingestion reads `raw/**/*.md` frontmatter and body content only.
+
 ## Extension points
 
-- Register another LLM by implementing `ProviderBackend` for SDK-client construction and model discovery, implementing `LLMProvider` for a configured chat session, and composing a validated `ProviderSpec` into a `ProviderRegistry`.
+- Register another LLM by supplying a `model-runtime` chat adapter and model-discovery function to `ModelRuntimeBackend`, then composing a validated `ProviderSpec` into a `ProviderRegistry`.
 - Add another vector backend by implementing the `VectorStore` interface and wiring it into CLI construction.
 - Add ingestion formats behind loaders that produce the existing document model.
 - Add safe dataframe operations as explicit tools rather than enabling arbitrary Python execution.

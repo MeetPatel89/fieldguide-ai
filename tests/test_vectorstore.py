@@ -4,6 +4,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock
 
+import numpy as np
+
 from fieldguide_ai.errors import EmbeddingError, VectorStoreOperationError
 from fieldguide_ai.ingestion.models import DocumentChunk
 from fieldguide_ai.vectorstore import (
@@ -11,6 +13,7 @@ from fieldguide_ai.vectorstore import (
     EmbeddingProvider,
     NumpyVectorStore,
     OpenAIEmbeddingProvider,
+    VectorSearchResult,
     serialize_chunk_metadata,
 )
 
@@ -23,6 +26,23 @@ class FakeEmbeddingProvider(EmbeddingProvider):
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         self.calls.append(list(texts))
         return [self.embeddings[text] for text in texts]
+
+
+class VectorSearchResultTest(unittest.TestCase):
+    def test_metadata_is_immutable_and_isolated_from_input(self) -> None:
+        metadata = {"doc_id": "DOC-1", "source_path": "docs/original.md"}
+        result = VectorSearchResult(
+            chunk_id="DOC-1::chunk-0000",
+            content="First chunk",
+            metadata=metadata,
+            distance=0.125,
+        )
+
+        metadata["source_path"] = "docs/changed.md"
+
+        self.assertEqual(result.metadata["source_path"], "docs/original.md")
+        with self.assertRaises(TypeError):
+            result.metadata["source_path"] = "docs/changed.md"  # type: ignore[index]
 
 
 def make_chunk(
@@ -111,19 +131,6 @@ class ChromaVectorStoreTest(unittest.TestCase):
             name="knowledge-base"
         )
 
-    def test_result_metadata_is_a_defensive_copy(self) -> None:
-        self.collection.query.return_value = {
-            "ids": [["DOC-1::chunk-0000"]],
-            "documents": [["First chunk"]],
-            "metadatas": [[{"doc_id": "DOC-1", "tags": ["original"]}]],
-            "distances": [[0.125]],
-        }
-
-        result = self.store.query("query", n_results=1)[0]
-        result.metadata["tags"].append("changed")
-
-        self.assertEqual(result.metadata["tags"], ["original"])
-
     def test_indexes_and_replaces_document_chunks(self) -> None:
         chunk = make_chunk("DOC-1::chunk-0000", "DOC-1", "First chunk")
         self.store.replace_chunks([chunk])
@@ -147,10 +154,13 @@ class ChromaVectorStoreTest(unittest.TestCase):
         self.assertEqual(results[0].chunk_id, "DOC-1::chunk-0000")
         self.assertEqual(results[0].content, "First chunk")
         self.assertEqual(results[0].distance, 0.125)
-        self.collection.query.assert_called_once_with(
-            query_embeddings=[[1.0, 0.0]],
-            n_results=3,
-            include=["documents", "metadatas", "distances"],
+        call_kwargs = self.collection.query.call_args.kwargs
+        self.assertEqual(call_kwargs["n_results"], 3)
+        self.assertEqual(
+            call_kwargs["include"], ["documents", "metadatas", "distances"]
+        )
+        np.testing.assert_array_equal(
+            call_kwargs["query_embeddings"], np.asarray([1.0, 0.0], dtype=np.float32)
         )
 
     def test_query_translates_chroma_errors(self) -> None:

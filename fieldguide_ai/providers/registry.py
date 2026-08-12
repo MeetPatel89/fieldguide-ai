@@ -8,9 +8,11 @@ from typing import Mapping
 
 from fieldguide_ai.chat import ChatMessage
 from fieldguide_ai.errors import ConfigurationError, ProviderNotFoundError
-from fieldguide_ai.providers.anthropic_provider import AnthropicBackend
 from fieldguide_ai.providers.base import LLMProvider, ProviderBackend
-from fieldguide_ai.providers.openai_provider import OpenAIBackend
+from fieldguide_ai.providers.runtime_provider import (
+    anthropic_backend,
+    openai_backend,
+)
 
 OPENAI_DEFAULT_MODEL = "gpt-5-nano"
 ANTHROPIC_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
@@ -125,14 +127,14 @@ def create_provider_registry(
                 label="OpenAI",
                 models=("gpt-5-nano", "gpt-5-mini", "gpt-4o-mini"),
                 default_model=OPENAI_DEFAULT_MODEL,
-                backend=OpenAIBackend(api_key=openai_api_key),
+                backend=openai_backend(openai_api_key),
             ),
             ProviderSpec(
                 name="anthropic",
                 label="Anthropic",
                 models=("claude-haiku-4-5-20251001", "claude-sonnet-5"),
                 default_model=ANTHROPIC_DEFAULT_MODEL,
-                backend=AnthropicBackend(api_key=anthropic_api_key),
+                backend=anthropic_backend(anthropic_api_key),
             ),
         ]
     )
@@ -172,6 +174,6 @@ if __name__ == "__main__":
         label="OpenAI",
         models=("gpt-5-nano", "gpt-5-mini", "gpt-4o-mini"),
         default_model=OPENAI_DEFAULT_MODEL,
-        backend=OpenAIBackend(api_key=os.getenv("OPENAI_API_KEY")),
+        backend=openai_backend(os.getenv("OPENAI_API_KEY")),
     )
     spec.available_models()

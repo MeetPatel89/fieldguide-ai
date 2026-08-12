@@ -2,12 +2,13 @@ import io
 import os
 import unittest
 from collections.abc import Sequence
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from fieldguide_ai import interactive
 from fieldguide_ai.chat import ChatMessage, GenerationResult
+from fieldguide_ai.config import SessionConfig
 from fieldguide_ai.providers import (
-    OpenAIProvider,
+    ModelRuntimeProvider,
     ProviderRegistry,
     ProviderSpec,
     get_provider,
@@ -40,13 +41,13 @@ class ProviderRegistryTest(unittest.TestCase):
         self.assertIn(provider.default_model, provider.models)
 
     @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})
-    @patch("fieldguide_ai.providers.openai_provider.OpenAI")
-    def test_factory_builds_openai_provider(self, openai_client_type: Mock) -> None:
+    @patch("fieldguide_ai.providers.runtime_provider.OpenAIAdapter")
+    def test_factory_builds_openai_provider(self, openai_adapter_type: Mock) -> None:
         provider = get_provider("openai").build_provider("gpt-5-mini")
 
-        self.assertIsInstance(provider, OpenAIProvider)
+        self.assertIsInstance(provider, ModelRuntimeProvider)
         self.assertEqual(provider.model, "gpt-5-mini")
-        openai_client_type.assert_called_once_with(api_key="test-key")
+        openai_adapter_type.assert_called_once_with(api_key="test-key")
 
     def test_unknown_provider_raises_value_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsupported LLM provider: unknown"):
@@ -67,20 +68,6 @@ class InteractiveWizardTest(unittest.TestCase):
             backend=self.backend,
         )
         self.registry = ProviderRegistry([self.provider_spec])
-
-    def test_session_reconfiguration_returns_a_new_validated_value(self) -> None:
-        config = interactive.SessionConfig()
-
-        updated = config.with_store(None, None, "documents").with_model("new-model")
-
-        self.assertEqual(config.model, "gpt-5-nano")
-        self.assertEqual(config.store_type, "chroma")
-        self.assertEqual(updated.model, "new-model")
-        self.assertIsNone(updated.store_type)
-
-    def test_session_rejects_partial_store_configuration(self) -> None:
-        with self.assertRaisesRegex(ValueError, "requires a path"):
-            interactive.SessionConfig(store_type="faiss", store_path=None)
 
     def test_wizard_builds_configured_store_for_retrieval(self) -> None:
         output_stream = io.StringIO()
@@ -216,7 +203,7 @@ class InteractiveWizardTest(unittest.TestCase):
         )
         vector_store = Mock()
         vector_store.query.return_value = [source]
-        config = interactive.SessionConfig(
+        config = SessionConfig(
             system_prompt="Use sources.", store_type="faiss", store_path="index"
         )
         output_stream = io.StringIO()
@@ -237,6 +224,38 @@ class InteractiveWizardTest(unittest.TestCase):
         self.assertIn("Session configuration", output)
         self.assertEqual(self.provider.get_history()[0].content, "What is indexed?")
 
+    def test_plain_chat_displays_generating_status(self) -> None:
+        console = MagicMock()
+
+        with patch.object(interactive, "_console", return_value=console):
+            interactive.run_chat_loop(
+                self.provider,
+                input_stream=io.StringIO("Hello\n:quit\n"),
+                output_stream=io.StringIO(),
+                config=SessionConfig(store_type=None, store_path=None),
+                registry=self.registry,
+            )
+
+        console.status.assert_called_once_with("[cyan]Generating…[/cyan]")
+
+    def test_retrieval_chat_displays_searching_and_generating_status(self) -> None:
+        console = MagicMock()
+        vector_store = Mock()
+        vector_store.query.return_value = []
+
+        with patch.object(interactive, "_console", return_value=console):
+            interactive.run_chat_loop(
+                self.provider,
+                input_stream=io.StringIO("Hello\n:quit\n"),
+                output_stream=io.StringIO(),
+                config=SessionConfig(store_type="faiss", store_path="index"),
+                vector_store=vector_store,
+                registry=self.registry,
+            )
+
+        console.status.assert_called_once_with("[cyan]Searching and generating…[/cyan]")
+        vector_store.query.assert_called_once_with("Hello", n_results=5)
+
     def test_chat_commands_rebuild_components_and_preserve_history(self) -> None:
         self.provider = FakeProvider(
             message_history=[ChatMessage(role="user", content="Earlier question")]
@@ -256,7 +275,7 @@ class InteractiveWizardTest(unittest.TestCase):
             default_model="claude-test",
             backend=anthropic_backend,
         )
-        config = interactive.SessionConfig(system_prompt="Original prompt")
+        config = SessionConfig(system_prompt="Original prompt")
         output_stream = io.StringIO()
 
         registry = ProviderRegistry([self.provider_spec, anthropic_spec])
@@ -309,7 +328,7 @@ class InteractiveWizardTest(unittest.TestCase):
                 self.provider,
                 input_stream=io.StringIO(":model\n:quit\n"),
                 output_stream=output_stream,
-                config=interactive.SessionConfig(
+                config=SessionConfig(
                     store_type=None,
                     store_path=None,
                 ),

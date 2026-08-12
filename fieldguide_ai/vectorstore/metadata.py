@@ -5,8 +5,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from fieldguide_ai.ingestion.models import DocumentChunk
-
-VectorMetadataValue = str | int | float | bool | None
+from fieldguide_ai.vectorstore.base import VectorMetadataValue
 
 
 def serialize_chunk_metadata(chunk: DocumentChunk) -> dict[str, VectorMetadataValue]:

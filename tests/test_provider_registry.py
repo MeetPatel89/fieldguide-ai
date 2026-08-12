@@ -6,11 +6,11 @@ from dataclasses import replace
 from unittest.mock import Mock, patch
 
 from fieldguide_ai.providers import (
-    AnthropicProvider,
-    OpenAIProvider,
+    ModelRuntimeProvider,
     ProviderRegistry,
     ProviderSpec,
     build_provider,
+    create_provider_registry,
     get_provider,
 )
 
@@ -73,9 +73,18 @@ class ProviderRegistryTest(unittest.TestCase):
                 backend=Mock(),
             )
 
+    def test_runtime_backend_requires_a_provider_api_key(self) -> None:
+        registry = create_provider_registry(
+            openai_api_key=None,
+            anthropic_api_key=None,
+        )
+
+        with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY is not set"):
+            registry.get("openai").build_provider()
+
     @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})
-    @patch("fieldguide_ai.providers.openai_provider.OpenAI")
-    @patch("fieldguide_ai.providers.openai_provider.OpenAIProvider")
+    @patch("fieldguide_ai.providers.runtime_provider.OpenAI")
+    @patch("fieldguide_ai.providers.runtime_provider.OpenAIAdapter")
     def test_openai_discovery_does_not_construct_a_chat_provider(
         self,
         provider_type: Mock,
@@ -94,8 +103,8 @@ class ProviderRegistryTest(unittest.TestCase):
         provider_type.assert_not_called()
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("fieldguide_ai.providers.anthropic_provider.Anthropic")
-    @patch("fieldguide_ai.providers.anthropic_provider.AnthropicProvider")
+    @patch("fieldguide_ai.providers.runtime_provider.Anthropic")
+    @patch("fieldguide_ai.providers.runtime_provider.AnthropicAdapter")
     def test_anthropic_discovery_does_not_construct_a_chat_provider(
         self,
         provider_type: Mock,
@@ -114,30 +123,30 @@ class ProviderRegistryTest(unittest.TestCase):
         provider_type.assert_not_called()
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("fieldguide_ai.providers.anthropic_provider.Anthropic")
+    @patch("fieldguide_ai.providers.runtime_provider.AnthropicAdapter")
     def test_anthropic_factory_forwards_selected_model(
         self,
-        anthropic_client_type: Mock,
+        anthropic_adapter_type: Mock,
     ) -> None:
         """The Anthropic factory should retain the selected model ID."""
         provider = build_provider("anthropic", "claude-sonnet-5")
 
-        self.assertIsInstance(provider, AnthropicProvider)
+        self.assertIsInstance(provider, ModelRuntimeProvider)
         self.assertEqual(provider.model, "claude-sonnet-5")
-        anthropic_client_type.assert_called_once_with(api_key="test-key")
+        anthropic_adapter_type.assert_called_once_with(api_key="test-key")
 
     @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})
-    @patch("fieldguide_ai.providers.openai_provider.OpenAI")
+    @patch("fieldguide_ai.providers.runtime_provider.OpenAIAdapter")
     def test_openai_factory_forwards_selected_model(
         self,
-        openai_client_type: Mock,
+        openai_adapter_type: Mock,
     ) -> None:
         """The OpenAI factory should retain the selected model ID."""
         provider = build_provider("openai", "gpt-5-mini")
 
-        self.assertIsInstance(provider, OpenAIProvider)
+        self.assertIsInstance(provider, ModelRuntimeProvider)
         self.assertEqual(provider.model, "gpt-5-mini")
-        openai_client_type.assert_called_once_with(api_key="test-key")
+        openai_adapter_type.assert_called_once_with(api_key="test-key")
 
 
 if __name__ == "__main__":

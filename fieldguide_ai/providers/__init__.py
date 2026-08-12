@@ -1,11 +1,6 @@
 """Public LLM provider interfaces and registry helpers."""
 
-from fieldguide_ai.providers.anthropic_provider import (
-    AnthropicBackend,
-    AnthropicProvider,
-)
 from fieldguide_ai.providers.base import LLMProvider, ProviderBackend
-from fieldguide_ai.providers.openai_provider import OpenAIBackend, OpenAIProvider
 from fieldguide_ai.providers.registry import (
     ProviderRegistry,
     ProviderSpec,
@@ -14,18 +9,24 @@ from fieldguide_ai.providers.registry import (
     get_provider,
     registry_from_environment,
 )
+from fieldguide_ai.providers.runtime_provider import (
+    ModelRuntimeBackend,
+    ModelRuntimeProvider,
+    anthropic_backend,
+    openai_backend,
+)
 
 __all__ = [
-    "AnthropicProvider",
-    "AnthropicBackend",
     "LLMProvider",
-    "OpenAIBackend",
-    "OpenAIProvider",
+    "ModelRuntimeBackend",
+    "ModelRuntimeProvider",
     "ProviderRegistry",
     "ProviderSpec",
     "ProviderBackend",
     "build_provider",
+    "anthropic_backend",
     "create_provider_registry",
     "get_provider",
+    "openai_backend",
     "registry_from_environment",
 ]
