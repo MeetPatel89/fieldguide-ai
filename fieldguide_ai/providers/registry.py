@@ -1,32 +1,47 @@
-"""Validated registry of LLM provider specifications."""
+"""Validated registry and model-runtime composition for LLM providers."""
 
 import os
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
+from typing import Mapping, Protocol
 
-from fieldguide_ai.chat import ChatMessage
-from fieldguide_ai.errors import ConfigurationError, ProviderNotFoundError
-from fieldguide_ai.providers.base import LLMProvider, ProviderBackend
-from fieldguide_ai.providers.runtime_provider import (
-    anthropic_backend,
-    openai_backend,
+from model_runtime import (
+    AnthropicAdapter,
+    ChatModel,
+    ChatSession,
+    Message,
+    ModelCatalog,
+    ModelRouter,
+    ModelRuntime,
+    OpenAIAdapter,
+    run_sync,
 )
+
+from fieldguide_ai.errors import ConfigurationError, ProviderNotFoundError
 
 OPENAI_DEFAULT_MODEL = "gpt-5-nano"
 ANTHROPIC_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
 
-@dataclass(frozen=True)
+class _RegistryAdapter(ChatModel, ModelCatalog, Protocol):
+    """Adapter behavior needed at Fieldguide's composition boundary."""
+
+
+AdapterFactory = Callable[[str], _RegistryAdapter]
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderSpec:
-    """Validated presentation metadata and backend for one LLM provider."""
+    """Validated presentation, credential, and adapter metadata for a provider."""
 
     name: str
     label: str
     models: tuple[str, ...]
     default_model: str
-    backend: ProviderBackend
+    adapter_factory: AdapterFactory
+    api_key: str | None = None
+    credential_name: str | None = None
 
     def __post_init__(self) -> None:
         """Reject incomplete provider registrations."""
@@ -34,6 +49,7 @@ class ProviderSpec:
         label = self.label.strip()
         models = tuple(model.strip() for model in self.models)
         default_model = self.default_model.strip()
+        credential_name = (self.credential_name or f"{name.upper()}_API_KEY").strip()
         if not name:
             raise ConfigurationError("provider name must not be blank")
         if not label:
@@ -49,17 +65,23 @@ class ProviderSpec:
                 f"default model {default_model!r} is not a fallback model for "
                 f"provider {name!r}"
             )
+        if not credential_name:
+            raise ConfigurationError("credential name must not be blank")
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "label", label)
         object.__setattr__(self, "models", models)
         object.__setattr__(self, "default_model", default_model)
+        object.__setattr__(self, "credential_name", credential_name)
 
     def available_models(self) -> tuple[str, ...]:
         """Return provider-discovered models, or configured fallback models."""
+        adapter = self._build_adapter()
+        discovered = run_sync(
+            adapter.list_models,
+            operation_name=f"{self.name} model discovery",
+        )
         discovered_models = tuple(
-            dict.fromkeys(
-                model.strip() for model in self.backend.list_models() if model.strip()
-            )
+            dict.fromkeys(model.strip() for model in discovered if model.strip())
         )
         return discovered_models or self.models
 
@@ -67,18 +89,37 @@ class ProviderSpec:
         self,
         model: str | None = None,
         *,
-        message_history: Sequence[ChatMessage] | None = None,
+        history: Sequence[Message] | None = None,
         system_prompt: str | None = None,
-    ) -> LLMProvider:
-        """Build a configured chat session through this provider's backend."""
+    ) -> ChatSession:
+        """Build a conversation session around one model-runtime route."""
         selected_model = model or self.default_model
         if not selected_model.strip():
             raise ConfigurationError("model must not be blank")
-        return self.backend.build_provider(
-            selected_model,
-            message_history=message_history,
+        adapter = self._build_adapter()
+        router = ModelRouter({self.name: (adapter, selected_model)})
+        return ChatSession(
+            ModelRuntime(router),
+            self.name,
+            history=history if history is not None else (),
             system_prompt=system_prompt,
         )
+
+    def _build_adapter(self) -> _RegistryAdapter:
+        api_key = self._require_api_key()
+        try:
+            return self.adapter_factory(api_key)
+        except Exception as error:
+            raise ConfigurationError(
+                f"{self.name} client initialization failed"
+            ) from error
+
+    def _require_api_key(self) -> str:
+        if not self.api_key:
+            raise ConfigurationError(
+                f"{self.credential_name} is not set. Add it to your .env file."
+            )
+        return self.api_key
 
 
 class ProviderRegistry:
@@ -114,6 +155,14 @@ class ProviderRegistry:
         return tuple(self._providers.values())
 
 
+def _create_openai_adapter(api_key: str) -> _RegistryAdapter:
+    return OpenAIAdapter(api_key=api_key)
+
+
+def _create_anthropic_adapter(api_key: str) -> _RegistryAdapter:
+    return AnthropicAdapter(api_key=api_key)
+
+
 def create_provider_registry(
     *,
     openai_api_key: str | None,
@@ -127,14 +176,18 @@ def create_provider_registry(
                 label="OpenAI",
                 models=("gpt-5-nano", "gpt-5-mini", "gpt-4o-mini"),
                 default_model=OPENAI_DEFAULT_MODEL,
-                backend=openai_backend(openai_api_key),
+                adapter_factory=_create_openai_adapter,
+                api_key=openai_api_key,
+                credential_name="OPENAI_API_KEY",
             ),
             ProviderSpec(
                 name="anthropic",
                 label="Anthropic",
                 models=("claude-haiku-4-5-20251001", "claude-sonnet-5"),
                 default_model=ANTHROPIC_DEFAULT_MODEL,
-                backend=anthropic_backend(anthropic_api_key),
+                adapter_factory=_create_anthropic_adapter,
+                api_key=anthropic_api_key,
+                credential_name="ANTHROPIC_API_KEY",
             ),
         ]
     )
@@ -160,8 +213,8 @@ def build_provider(
     name: str,
     model: str | None = None,
     registry: ProviderRegistry | None = None,
-) -> LLMProvider:
-    """Construct a provider from an explicit or freshly composed registry."""
+) -> ChatSession:
+    """Construct a chat session from an explicit or freshly composed registry."""
     return get_provider(name, registry).build_provider(model)
 
 
@@ -169,11 +222,4 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
 
     load_dotenv()
-    spec = ProviderSpec(
-        name="openai",
-        label="OpenAI",
-        models=("gpt-5-nano", "gpt-5-mini", "gpt-4o-mini"),
-        default_model=OPENAI_DEFAULT_MODEL,
-        backend=openai_backend(os.getenv("OPENAI_API_KEY")),
-    )
-    spec.available_models()
+    registry_from_environment().get("openai").available_models()

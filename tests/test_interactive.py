@@ -1,38 +1,63 @@
+"""Tests for the rich interactive Fieldguide workflow."""
+
 import io
-import os
 import unittest
-from collections.abc import Sequence
 from unittest.mock import MagicMock, Mock, patch
 
+from model_runtime import ChatSession, Message, ProviderUnavailableError
+
 from fieldguide_ai import interactive
-from fieldguide_ai.chat import ChatMessage, GenerationResult
 from fieldguide_ai.config import SessionConfig
 from fieldguide_ai.providers import (
-    ModelRuntimeProvider,
     ProviderRegistry,
     ProviderSpec,
+    create_provider_registry,
     get_provider,
 )
-from fieldguide_ai.providers.base import LLMProvider
 from fieldguide_ai.vectorstore import VectorSearchResult
+from tests.session_fakes import (
+    FakeChatModel,
+    RecordingAdapterFactory,
+    make_session,
+    selected_model,
+)
 
 
 class Answer:
+    """Questionary-shaped answer fake."""
+
     def __init__(self, value: object) -> None:
         self.value = value
 
     def ask(self) -> object:
+        """Return the configured answer."""
         return self.value
 
 
-class FakeProvider(LLMProvider):
-    def generate(self, messages: Sequence[ChatMessage]) -> GenerationResult:
-        return self._record_generation(
-            GenerationResult(text="response", provider="fake", model="fake-model")
-        )
+def provider_spec(
+    name: str,
+    label: str,
+    models: tuple[str, ...],
+    adapter: FakeChatModel,
+) -> tuple[ProviderSpec, RecordingAdapterFactory]:
+    """Build a registry spec around a fake runtime adapter."""
+    factory = RecordingAdapterFactory(adapter)
+    return (
+        ProviderSpec(
+            name=name,
+            label=label,
+            models=models,
+            default_model=models[0],
+            adapter_factory=factory,
+            api_key="test-key",
+        ),
+        factory,
+    )
 
 
 class ProviderRegistryTest(unittest.TestCase):
+    """Verify built-in metadata and runtime-backed construction."""
+
     def test_openai_provider_is_registered(self) -> None:
         provider = get_provider("openai")
 
@@ -40,14 +65,19 @@ class ProviderRegistryTest(unittest.TestCase):
         self.assertEqual(provider.default_model, "gpt-5-nano")
         self.assertIn(provider.default_model, provider.models)
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})
-    @patch("fieldguide_ai.providers.runtime_provider.OpenAIAdapter")
-    def test_factory_builds_openai_provider(self, openai_adapter_type: Mock) -> None:
-        provider = get_provider("openai").build_provider("gpt-5-mini")
+    @patch("fieldguide_ai.providers.registry.OpenAIAdapter")
+    def test_factory_builds_openai_chat_session(self, adapter_type: Mock) -> None:
+        adapter_type.return_value = FakeChatModel()
+        registry = create_provider_registry(
+            openai_api_key="test-key",
+            anthropic_api_key=None,
+        )
 
-        self.assertIsInstance(provider, ModelRuntimeProvider)
-        self.assertEqual(provider.model, "gpt-5-mini")
-        openai_adapter_type.assert_called_once_with(api_key="test-key")
+        provider = registry.get("openai").build_provider("gpt-5-mini")
+
+        self.assertIsInstance(provider, ChatSession)
+        self.assertEqual(selected_model(provider), "gpt-5-mini")
+        adapter_type.assert_called_once_with(api_key="test-key")
 
     def test_unknown_provider_raises_value_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsupported LLM provider: unknown"):
@@ -55,17 +85,23 @@ class ProviderRegistryTest(unittest.TestCase):
 
 
 class InteractiveWizardTest(unittest.TestCase):
+    """Verify wizard choices, chat rendering, and live reconfiguration."""
+
     def setUp(self) -> None:
-        self.provider = FakeProvider()
-        self.backend = Mock()
-        self.backend.build_provider.return_value = self.provider
-        self.backend.list_models.return_value = ["gpt-5-mini", "gpt-5-nano"]
-        self.provider_spec = ProviderSpec(
-            name="openai",
-            label="OpenAI",
-            models=("gpt-5-nano", "gpt-5-mini"),
-            default_model="gpt-5-nano",
-            backend=self.backend,
+        self.adapter = FakeChatModel(
+            response_text="response",
+            discovered_models=("gpt-5-mini", "gpt-5-nano"),
+        )
+        self.provider = make_session(
+            FakeChatModel(response_text="response"),
+            route="openai",
+            model="gpt-5-nano",
+        )
+        self.provider_spec, self.factory = provider_spec(
+            "openai",
+            "OpenAI",
+            ("gpt-5-nano", "gpt-5-mini"),
+            self.adapter,
         )
         self.registry = ProviderRegistry([self.provider_spec])
 
@@ -96,11 +132,12 @@ class InteractiveWizardTest(unittest.TestCase):
             ) as build_vector_store,
             patch.object(interactive, "run_chat_loop") as run_chat_loop,
         ):
-            interactive.run_wizard(
+            completed = interactive.run_wizard(
                 output_stream=output_stream,
                 registry=self.registry,
             )
 
+        self.assertTrue(completed)
         build_vector_store.assert_called_once_with(
             provider_name="numpy",
             embedding_provider=embedding_provider,
@@ -112,6 +149,8 @@ class InteractiveWizardTest(unittest.TestCase):
         self.assertEqual(config.store_type, "numpy")
         self.assertEqual(config.system_prompt, "Use indexed knowledge.")
         self.assertIs(run_chat_loop.call_args.kwargs["vector_store"], vector_store)
+        session = run_chat_loop.call_args.args[0]
+        self.assertEqual(selected_model(session), "gpt-5-mini")
 
     def test_wizard_supports_plain_chat_without_embeddings(self) -> None:
         output_stream = io.StringIO()
@@ -188,11 +227,6 @@ class InteractiveWizardTest(unittest.TestCase):
             max_words=450,
             output_stream=output_stream,
         )
-        self.backend.build_provider.assert_called_once_with(
-            "custom-model",
-            message_history=None,
-            system_prompt="Ground answers.",
-        )
 
     def test_rich_chat_displays_sources_and_raw_history(self) -> None:
         source = VectorSearchResult(
@@ -222,7 +256,7 @@ class InteractiveWizardTest(unittest.TestCase):
         self.assertIn("docs/guide.md", output)
         self.assertIn("What is indexed?", output)
         self.assertIn("Session configuration", output)
-        self.assertEqual(self.provider.get_history()[0].content, "What is indexed?")
+        self.assertEqual(self.provider.history[0].text, "What is indexed?")
 
     def test_plain_chat_displays_generating_status(self) -> None:
         console = MagicMock()
@@ -256,29 +290,20 @@ class InteractiveWizardTest(unittest.TestCase):
         console.status.assert_called_once_with("[cyan]Searching and generating…[/cyan]")
         vector_store.query.assert_called_once_with("Hello", n_results=5)
 
-    def test_chat_commands_rebuild_components_and_preserve_history(self) -> None:
-        self.provider = FakeProvider(
-            message_history=[ChatMessage(role="user", content="Earlier question")]
+    def test_chat_commands_rebuild_sessions_and_preserve_history(self) -> None:
+        self.provider = make_session(
+            route="openai",
+            model="gpt-5-nano",
+            history=(Message.user("Earlier question"),),
         )
-        rebuilt_for_model = FakeProvider(
-            message_history=[ChatMessage(role="user", content="Earlier question")]
+        anthropic_spec, _ = provider_spec(
+            "anthropic",
+            "Anthropic",
+            ("claude-test",),
+            FakeChatModel(discovered_models=("claude-test",)),
         )
-        rebuilt_for_provider = FakeProvider()
-        self.backend.build_provider.side_effect = [rebuilt_for_model]
-        anthropic_backend = Mock()
-        anthropic_backend.build_provider.return_value = rebuilt_for_provider
-        anthropic_backend.list_models.return_value = ["claude-test"]
-        anthropic_spec = ProviderSpec(
-            name="anthropic",
-            label="Anthropic",
-            models=("claude-test",),
-            default_model="claude-test",
-            backend=anthropic_backend,
-        )
-        config = SessionConfig(system_prompt="Original prompt")
-        output_stream = io.StringIO()
-
         registry = ProviderRegistry([self.provider_spec, anthropic_spec])
+        config = SessionConfig(system_prompt="Original prompt")
 
         with (
             patch.object(
@@ -296,11 +321,16 @@ class InteractiveWizardTest(unittest.TestCase):
                 "text",
                 return_value=Answer("Updated prompt"),
             ),
+            patch.object(
+                interactive,
+                "_build_provider",
+                wraps=interactive._build_provider,
+            ) as build_provider,
         ):
             updated_config = interactive.run_chat_loop(
                 self.provider,
                 input_stream=io.StringIO(":model\n:store\n:system\n:provider\n:quit\n"),
-                output_stream=output_stream,
+                output_stream=io.StringIO(),
                 config=config,
                 vector_store=Mock(),
                 registry=registry,
@@ -310,11 +340,30 @@ class InteractiveWizardTest(unittest.TestCase):
         self.assertEqual(updated_config.model, "claude-test")
         self.assertIsNone(updated_config.store_type)
         self.assertEqual(updated_config.system_prompt, "Updated prompt")
-        anthropic_backend.build_provider.assert_called_once_with(
-            "claude-test",
-            message_history=[ChatMessage(role="user", content="Earlier question")],
-            system_prompt="Updated prompt",
+        self.assertEqual(build_provider.call_count, 2)
+        for call in build_provider.call_args_list:
+            self.assertEqual(
+                call.kwargs["history"], (Message.user("Earlier question"),)
+            )
+
+    def test_model_discovery_failure_uses_configured_fallbacks(self) -> None:
+        error = ProviderUnavailableError(
+            "offline",
+            retryable=False,
+            provider="openai",
         )
+        failing_spec, _ = provider_spec(
+            "openai",
+            "OpenAI",
+            ("gpt-5-nano",),
+            FakeChatModel(discovery_error=error),
+        )
+        output_stream = io.StringIO()
+
+        models = interactive._available_models(failing_spec, output_stream)
+
+        self.assertEqual(models, ("gpt-5-nano",))
+        self.assertIn("Could not load current OpenAI models", output_stream.getvalue())
 
     def test_mid_session_cancellation_is_an_explicit_non_fatal_result(self) -> None:
         output_stream = io.StringIO()
@@ -328,21 +377,14 @@ class InteractiveWizardTest(unittest.TestCase):
                 self.provider,
                 input_stream=io.StringIO(":model\n:quit\n"),
                 output_stream=output_stream,
-                config=SessionConfig(
-                    store_type=None,
-                    store_path=None,
-                ),
+                config=SessionConfig(store_type=None, store_path=None),
                 registry=self.registry,
             )
 
         self.assertEqual(config.model, "gpt-5-nano")
         self.assertIn("Configuration change cancelled.", output_stream.getvalue())
 
-    @patch.object(
-        interactive,
-        "run_wizard",
-        return_value=False,
-    )
+    @patch.object(interactive, "run_wizard", return_value=False)
     @patch.object(interactive, "registry_from_environment")
     @patch.object(interactive, "load_dotenv")
     def test_main_exits_cleanly_when_cancelled(
@@ -362,3 +404,7 @@ class InteractiveWizardTest(unittest.TestCase):
         run_wizard.assert_called_once_with(
             registry=registry_from_environment.return_value
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

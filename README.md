@@ -18,6 +18,8 @@ Install the project from the repository root:
 uv sync
 ```
 
+The lockfile resolves `model-runtime` from the `v0.2.0` Git tag.
+
 Create a local `.env` file:
 
 ```dotenv
@@ -56,7 +58,7 @@ Operational knowledge often lives across runbooks, policies, product documentati
 
 Loading, chunking, validation, persistence, and dataframe operations are deterministic and remain ordinary Python pipelines. A model is useful where the user asks open-ended questions, conversational context must be maintained, or the appropriate dataframe tool and arguments must be selected dynamically.
 
-The project does not treat every step as agentic. Deterministic work stays explicit and testable; model-driven work is isolated behind provider and tool interfaces. The shared `model-runtime` package owns asynchronous OpenAI and Anthropic chat calls, routing, retries, timeouts, and usage accounting; Fieldguide bridges it behind a synchronous conversation boundary. Credentials, vector stores, and filesystem loading enter through explicit composition boundaries so core conversation and indexing behavior can be tested without network or disk access.
+The project does not treat every step as agentic. Deterministic work stays explicit and testable; model-driven work is isolated behind provider and tool interfaces. The shared `model-runtime` package owns asynchronous OpenAI and Anthropic chat calls, routing, retries, timeouts, usage accounting, conversation state, generation telemetry, and the guarded synchronous bridge used by Fieldguide's CLI. Credentials, vector stores, and filesystem loading enter through explicit composition boundaries so core conversation and indexing behavior can be tested without network or disk access.
 
 ## Usage
 
@@ -174,7 +176,7 @@ This entry point expects the local CSV corpus to exist. It is separate from the 
 ```text
 User
   |
-  +-- rich/questionary wizard ---> provider registry --> model-runtime --> OpenAI / Anthropic
+  +-- rich/questionary wizard ---> provider registry --> ChatSession --> ModelRuntime --> OpenAI / Anthropic
   |          |
   |          +--> Markdown ingestion and retrieval
   |                    |
@@ -193,11 +195,11 @@ User
 | `fieldguide_ai/interactive.py` | Rich guided configuration, sourced chat, and live session commands. |
 | `fieldguide_ai/knowledge_bot.py` | Optional retrieval through a focused search boundary, prompt augmentation, raw history preservation, and sourced answers. |
 | `fieldguide_ai/cli.py` | Flag-based commands, indexing orchestration, and retrieval-capable chat loop. |
-| `fieldguide_ai/chat/` | Provider-agnostic chat communication objects: immutable `ChatMessage` turns plus normalized `GenerationResult` and token usage models. |
-| `fieldguide_ai/providers/` | Stateful synchronous conversation abstraction, immutable registry, model-runtime bridge, direct SDK model discovery, and normalized provider errors. |
+| `model-runtime.ChatSession` | System context, normalized `Message` history, atomic conversation turns, `GenerationRecord` telemetry, and guarded sync calls. |
+| `fieldguide_ai/providers/` | Immutable provider registry, credential checks, adapter factories, single-route runtime composition, and model discovery. |
 | `fieldguide_ai/ingestion/` | Markdown loading, frontmatter parsing, section chunking, and document replacement through a focused index boundary. |
 | `fieldguide_ai/vectorstore/` | Focused search/index interfaces, composition factory, embedding abstraction, and Chroma/NumPy/FAISS persistence. |
-| `fieldguide_ai/errors.py` | Application-level configuration, provider, embedding, document-loading, and vector-store exceptions. |
+| `fieldguide_ai/errors.py` | Application-level configuration, embedding, document-loading, and vector-store exceptions. Model failures use `ModelRuntimeError`. |
 | `langchain_pandas/` | Validated dataframe catalog with defensive snapshots and constrained inspection/query tools. |
 
 ## Observable workflows
@@ -218,7 +220,7 @@ Embedding is completed before persisted document records are replaced, reducing 
 1. Set the configured system prompt on the provider, separate from turn history.
 2. Embed the question and retrieve the configured number of nearest chunks when a vector store is enabled.
 3. Send accumulated turns plus an augmented copy of the current question and retrieved context to the provider. Only the original question is stored in visible history.
-4. Normalize the provider payload into a `GenerationResult`; only after generation succeeds, atomically append the original user question and answer to history, then display the retrieved document/section sources.
+4. Receive a model-runtime `GenerationRecord`; only after generation succeeds, atomically append the original user question and normalized assistant message to history, then display the retrieved document/section sources.
 5. Allow the user to inspect, clear, or reconfigure the session. Provider and model changes preserve turn history where possible; clearing keeps the system prompt and generation log.
 
 This describes observable state and tool flow; it does not expose hidden model reasoning.
@@ -262,14 +264,17 @@ uv sync --extra dev
 uv run pyright
 ```
 
-Tests cover validated and defensive value objects, atomic message history, provider error translation and dependency injection, immutable interactive configuration, KnowledgeBot context/history behavior, Markdown parsing and chunking, Chroma/NumPy/FAISS persistence and search, metadata serialization, and dataframe tools.
+Tests cover integration with model-runtime messages and generation records, adapter discovery and dependency injection, immutable interactive configuration, KnowledgeBot context/history behavior, Markdown parsing and chunking, Chroma/NumPy/FAISS persistence and search, metadata serialization, and dataframe tools. The model-runtime repository owns the detailed atomic-session and sync-bridge contract tests.
 
 ## Guardrails and data handling
 
-- CLI entry points read credentials from the environment and inject them into provider backends; credentials must not be committed.
+- CLI entry points read credentials from the environment and inject them into provider adapter factories; credentials must not be committed.
 - Ingestion reads local Markdown content and persists embeddings and source text locally in the selected store.
 - The dataframe agent is instructed to use its registered tools and avoid answering from general knowledge, but model output should still be treated as untrusted until independently verified.
 - Retrieved local chunk text is sent to the configured model provider as prompt context.
+- Each in-process `ChatSession` retains visible normalized messages and generation records,
+  including raw provider responses, until that session is discarded. Clearing visible history
+  does not clear its generation log.
 - The primary chat loop has no external action tools or approval workflow.
 - There is no production authentication, authorization, audit log, or tenant isolation layer.
 
@@ -308,9 +313,8 @@ Do not interpret passing unit tests as evidence of answer quality or production 
 │   └── misc/               # CSV files used by the dataframe agent demo
 ├── fieldguide_ai/
 │   ├── ingestion/          # Markdown loading and chunking pipeline
-│   ├── chat/               # ChatMessage, GenerationResult, and token usage
 │   ├── config/             # Validated interactive session configuration
-│   ├── providers/          # LLM abstractions, adapters, and registry
+│   ├── providers/          # Provider metadata, adapter factories, and registry
 │   ├── vectorstore/        # Chroma, NumPy, and FAISS vector stores
 │   ├── knowledge_bot.py    # Retrieval-grounded chat orchestration
 │   ├── errors.py           # Stable application-level error boundary
@@ -326,7 +330,7 @@ Do not interpret passing unit tests as evidence of answer quality or production 
 └── pyproject.toml          # Package metadata and dependencies
 ```
 
-To see Fieldguide's sync provider boundary versus true `asyncio.gather` overlap across OpenAI and Anthropic network calls:
+To compare Fieldguide's `ChatSession` sync bridge with true `asyncio.gather` overlap across OpenAI and Anthropic network calls:
 
 ```bash
 uv run python notebooks/explore.py
@@ -337,7 +341,7 @@ The Nautilus ITSM corpus (`data/corpora/nautilus`) is synthetic enterprise suppo
 
 ## Extension points
 
-- Register another LLM by supplying a `model-runtime` chat adapter and model-discovery function to `ModelRuntimeBackend`, then composing a validated `ProviderSpec` into a `ProviderRegistry`.
+- Register another LLM by supplying a factory for an adapter that implements model-runtime's separate `ChatModel` and `ModelCatalog` protocols, then composing a validated `ProviderSpec` into a `ProviderRegistry`.
 - Add another vector backend by implementing the `VectorStore` interface and wiring it into CLI construction.
 - Add ingestion formats behind loaders that produce the existing document model.
 - Add safe dataframe operations as explicit tools rather than enabling arbitrary Python execution.

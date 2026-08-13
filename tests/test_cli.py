@@ -1,96 +1,119 @@
+"""Tests for the flag-based Fieldguide CLI."""
+
 import io
 import unittest
 from collections.abc import Sequence
 from contextlib import redirect_stderr
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
-from fieldguide_ai.chat import ChatMessage, GenerationResult
+from model_runtime import (
+    ChatSession,
+    Message,
+    MessageRole,
+    ModelRequest,
+    ModelResponse,
+    ProviderUnavailableError,
+)
+
 from fieldguide_ai.cli import (
+    DEMO_QUESTION,
     index_corpus,
+    main,
     parse_args,
     preview_chunks,
     print_history,
     run_chat_loop,
+    run_demo,
 )
-from fieldguide_ai.demo import build_system_prompt
+from fieldguide_ai.config import DEFAULT_SYSTEM_PROMPT
 from fieldguide_ai.ingestion.models import DocumentChunk
-from fieldguide_ai.providers.base import LLMProvider
+from tests.session_fakes import FakeChatModel, make_session
 
 
-class FakeProvider(LLMProvider):
-    def generate(self, messages: Sequence[ChatMessage]) -> GenerationResult:
-        user_messages = [
-            message.content for message in messages if message.role == "user"
-        ]
-        return self._record_generation(
-            GenerationResult(
-                text=f"reply to {user_messages[-1]}",
-                provider="fake",
-                model="fake-model",
-            )
-        )
+def reply_to_last_user(model_id: str, request: ModelRequest) -> ModelResponse:
+    """Build a deterministic response from the last normalized user message."""
+    user_messages = [
+        message.text for message in request.messages if message.role is MessageRole.USER
+    ]
+    return ModelResponse(
+        message=Message.assistant(f"reply to {user_messages[-1]}"),
+        model=model_id,
+    )
+
+
+def fake_provider() -> tuple[FakeChatModel, ChatSession]:
+    """Build a session whose adapter replies to the current user text."""
+    adapter = FakeChatModel(response_factory=reply_to_last_user)
+    return adapter, make_session(adapter)
 
 
 class FakeVectorStore:
+    """Recording vector replacement fake."""
+
     def __init__(self) -> None:
-        self.replacements = []
+        self.replacements: list[list[DocumentChunk]] = []
 
     def replace_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
+        """Record replacement chunks."""
         self.replacements.append(list(chunks))
 
     def delete_documents(self, doc_ids: Sequence[str]) -> None:
-        pass
+        """Accept unused deletion operations."""
 
 
 class CliTest(unittest.TestCase):
+    """Verify stateful CLI flow and deterministic indexing commands."""
+
     def test_chat_loop_maintains_history_across_turns(self) -> None:
-        provider = FakeProvider()
+        _, provider = fake_provider()
         input_stream = io.StringIO("First question\nFollow up\n:quit\n")
         output_stream = io.StringIO()
 
         run_chat_loop(provider, input_stream=input_stream, output_stream=output_stream)
 
-        self.assertEqual(provider.system_prompt, build_system_prompt())
+        self.assertEqual(provider.system_prompt, DEFAULT_SYSTEM_PROMPT)
         self.assertEqual(
-            [message.role for message in provider.get_history()],
-            ["user", "assistant", "user", "assistant"],
+            [message.role for message in provider.history],
+            [
+                MessageRole.USER,
+                MessageRole.ASSISTANT,
+                MessageRole.USER,
+                MessageRole.ASSISTANT,
+            ],
         )
         self.assertIn("Assistant> reply to First question", output_stream.getvalue())
         self.assertIn("Assistant> reply to Follow up", output_stream.getvalue())
 
     def test_chat_loop_can_clear_history_but_keeps_system_prompt(self) -> None:
-        provider = FakeProvider()
-        input_stream = io.StringIO("Question\n:clear\n:quit\n")
-        output_stream = io.StringIO()
-
-        run_chat_loop(provider, input_stream=input_stream, output_stream=output_stream)
-
-        self.assertEqual(provider.get_history(), [])
-        self.assertEqual(provider.system_prompt, build_system_prompt())
-        self.assertIn("History cleared.", output_stream.getvalue())
-
-    def test_chat_loop_reuses_custom_system_prompt_after_clear(self) -> None:
-        provider = FakeProvider()
-        input_stream = io.StringIO("Question\n:clear\n:quit\n")
-        output_stream = io.StringIO()
+        _, provider = fake_provider()
 
         run_chat_loop(
             provider,
-            input_stream=input_stream,
-            output_stream=output_stream,
+            input_stream=io.StringIO("Question\n:clear\n:quit\n"),
+            output_stream=io.StringIO(),
+        )
+
+        self.assertEqual(provider.history, ())
+        self.assertEqual(provider.system_prompt, DEFAULT_SYSTEM_PROMPT)
+
+    def test_chat_loop_reuses_custom_system_prompt_after_clear(self) -> None:
+        _, provider = fake_provider()
+
+        run_chat_loop(
+            provider,
+            input_stream=io.StringIO("Question\n:clear\n:quit\n"),
+            output_stream=io.StringIO(),
             system_prompt="Answer only from the field guide.",
         )
 
-        self.assertEqual(provider.get_history(), [])
-        self.assertEqual(
-            provider.system_prompt,
-            "Answer only from the field guide.",
-        )
+        self.assertEqual(provider.history, ())
+        self.assertEqual(provider.system_prompt, "Answer only from the field guide.")
 
     def test_print_history_writes_system_then_turns(self) -> None:
-        provider = FakeProvider(
-            message_history=[ChatMessage(role="user", content="Hello")],
+        provider = make_session(
+            history=(Message.user("Hello"),),
             system_prompt="Rules",
         )
         output_stream = io.StringIO()
@@ -98,6 +121,19 @@ class CliTest(unittest.TestCase):
         print_history(provider, output_stream=output_stream)
 
         self.assertEqual(output_stream.getvalue(), "1. system: Rules\n2. user: Hello\n")
+
+    def test_demo_uses_runtime_session_record(self) -> None:
+        adapter, provider = fake_provider()
+        output_stream = io.StringIO()
+
+        run_demo(provider, output_stream)
+
+        self.assertEqual(provider.system_prompt, DEFAULT_SYSTEM_PROMPT)
+        self.assertEqual(provider.history[0], Message.user(DEMO_QUESTION))
+        self.assertEqual(
+            adapter.requests[0][1].messages[0], Message.system(DEFAULT_SYSTEM_PROMPT)
+        )
+        self.assertIn(f"reply to {DEMO_QUESTION}", output_stream.getvalue())
 
     def test_preview_chunks_prints_corpus_summary(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -185,3 +221,24 @@ class CliTest(unittest.TestCase):
     def test_rejects_non_positive_retrieval_count(self) -> None:
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             parse_args(["--top-k", "0"])
+
+    def test_main_renders_model_runtime_errors_without_a_traceback(self) -> None:
+        error = ProviderUnavailableError(
+            "provider offline",
+            retryable=False,
+            provider="openai",
+        )
+        stderr = io.StringIO()
+
+        with (
+            patch("fieldguide_ai.cli.build_provider", side_effect=error),
+            redirect_stderr(stderr),
+            self.assertRaisesRegex(SystemExit, "1"),
+        ):
+            main(["--vector-store", "none"])
+
+        self.assertIn("Error: provider offline", stderr.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

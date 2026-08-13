@@ -8,8 +8,9 @@ from pathlib import Path
 from typing import TextIO
 
 from dotenv import load_dotenv
+from model_runtime import ChatSession, ModelRuntimeError
 
-from fieldguide_ai.demo import build_demo_messages, build_system_prompt
+from fieldguide_ai.config import DEFAULT_SYSTEM_PROMPT
 from fieldguide_ai.errors import ConfigurationError
 from fieldguide_ai.ingestion import (
     DocumentIndexingPipeline,
@@ -18,12 +19,7 @@ from fieldguide_ai.ingestion import (
     load_markdown_documents,
 )
 from fieldguide_ai.knowledge_bot import KnowledgeBot
-from fieldguide_ai.providers import (
-    LLMProvider,
-    ModelRuntimeProvider,
-    ProviderRegistry,
-    registry_from_environment,
-)
+from fieldguide_ai.providers import ProviderRegistry, registry_from_environment
 from fieldguide_ai.providers import (
     build_provider as build_registered_provider,
 )
@@ -42,19 +38,15 @@ from fieldguide_ai.vectorstore import (
 
 DEFAULT_MODEL = OPENAI_DEFAULT_MODEL
 EXIT_COMMANDS = {":exit", ":q", ":quit", "exit", "quit"}
+DEMO_QUESTION = "What incident patterns should an operator investigate first?"
 
 
 def build_provider(
     model: str,
     registry: ProviderRegistry | None = None,
-) -> ModelRuntimeProvider:
+) -> ChatSession:
     """Build the registered OpenAI provider for a model."""
-    provider = build_registered_provider("openai", model, registry)
-    if not isinstance(provider, ModelRuntimeProvider):
-        raise TypeError(
-            "the openai registry entry did not create a ModelRuntimeProvider"
-        )
-    return provider
+    return build_registered_provider("openai", model, registry)
 
 
 def build_vector_store(
@@ -72,15 +64,15 @@ def build_vector_store(
     )
 
 
-def run_demo(provider: LLMProvider, output_stream: TextIO = sys.stdout) -> None:
-    """Run the stateless demonstration prompt."""
-    provider.set_system_prompt(build_system_prompt())
-    result = provider.generate(build_demo_messages())
+def run_demo(provider: ChatSession, output_stream: TextIO = sys.stdout) -> None:
+    """Run one demonstration turn against the default application prompt."""
+    provider.set_system_prompt(DEFAULT_SYSTEM_PROMPT)
+    result = provider.complete_turn_sync(DEMO_QUESTION)
     output_stream.write(f"{result.text}\n")
 
 
 def run_chat_loop(
-    provider: LLMProvider,
+    provider: ChatSession,
     input_stream: TextIO = sys.stdin,
     output_stream: TextIO = sys.stdout,
     system_prompt: str | None = None,
@@ -89,7 +81,7 @@ def run_chat_loop(
 ) -> None:
     """Run an interactive, stateful chat session with optional retrieval."""
     provider.set_system_prompt(
-        build_system_prompt() if system_prompt is None else system_prompt
+        DEFAULT_SYSTEM_PROMPT if system_prompt is None else system_prompt
     )
     output_stream.write(
         "Stateful chat started. Type :quit to exit, :history to inspect state.\n"
@@ -135,7 +127,7 @@ def run_chat_loop(
                 output_stream.write(f"- {path} — {section}\n")
 
 
-def print_history(provider: LLMProvider, output_stream: TextIO = sys.stdout) -> None:
+def print_history(provider: ChatSession, output_stream: TextIO = sys.stdout) -> None:
     """Write the provider's conversation history to a stream."""
     write_history(provider, output_stream)
 
@@ -217,7 +209,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--demo",
         action="store_true",
-        help="Run the original stateless demo prompt instead of interactive chat.",
+        help="Run one demonstration question instead of interactive chat.",
     )
     parser.add_argument(
         "--model",
@@ -285,8 +277,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Run the Fieldguide command-line interface."""
+def _run_main(argv: list[str] | None = None) -> None:
+    """Execute the parsed Fieldguide command without translating errors."""
     load_dotenv()
     args = parse_args(argv)
     provider_registry = registry_from_environment()
@@ -340,6 +332,15 @@ def main(argv: list[str] | None = None) -> None:
             collection_name=args.collection_name,
         )
     run_chat_loop(provider, vector_store=vector_store, top_k=args.top_k)
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Run the Fieldguide command-line interface with stable error rendering."""
+    try:
+        _run_main(argv)
+    except (ConfigurationError, ModelRuntimeError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
 
 
 def _preview_text(text: str, max_chars: int = 240) -> str:

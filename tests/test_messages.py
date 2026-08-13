@@ -1,17 +1,30 @@
+"""Integration checks for model-runtime messages used by Fieldguide."""
+
 import unittest
+from dataclasses import FrozenInstanceError
 
-from fieldguide_ai.chat import ChatMessage
+from model_runtime import Message, MessageRole
 
 
-class ChatMessageTest(unittest.TestCase):
-    def test_stores_role_and_content(self) -> None:
-        message = ChatMessage(role="user", content="Hello")
+class MessageIntegrationTest(unittest.TestCase):
+    """Verify Fieldguide's visible turns use normalized runtime messages."""
 
-        self.assertEqual(message.role, "user")
-        self.assertEqual(message.content, "Hello")
+    def test_stores_normalized_role_and_text(self) -> None:
+        message = Message.user("Hello")
 
-    def test_is_immutable(self) -> None:
-        message = ChatMessage(role="assistant", content="Hi")
+        self.assertIs(message.role, MessageRole.USER)
+        self.assertEqual(message.text, "Hello")
 
-        with self.assertRaises(Exception):
-            message.content = "changed"  # type: ignore[misc]
+    def test_rejects_unknown_roles(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported message role"):
+            Message(role="critic", content="No")
+
+    def test_is_frozen(self) -> None:
+        message = Message.assistant("Hi")
+
+        with self.assertRaises(FrozenInstanceError):
+            message.role = MessageRole.USER  # type: ignore[misc]
+
+
+if __name__ == "__main__":
+    unittest.main()

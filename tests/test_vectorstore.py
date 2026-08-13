@@ -1,5 +1,6 @@
 import unittest
 from collections.abc import Sequence
+from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock
@@ -127,9 +128,10 @@ class ChromaVectorStoreTest(unittest.TestCase):
         )
 
     def test_creates_or_reuses_named_collection(self) -> None:
-        self.client.get_or_create_collection.assert_called_once_with(
-            name="knowledge-base"
-        )
+        kwargs = self.client.get_or_create_collection.call_args.kwargs
+        self.assertEqual(kwargs["name"], "knowledge-base")
+        self.assertEqual(kwargs["metadata"]["description"], "")
+        datetime.fromisoformat(kwargs["metadata"]["created_at"])
 
     def test_indexes_and_replaces_document_chunks(self) -> None:
         chunk = make_chunk("DOC-1::chunk-0000", "DOC-1", "First chunk")

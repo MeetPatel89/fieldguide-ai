@@ -2,28 +2,11 @@
 
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import Protocol
 
-from fieldguide_ai.chat import ChatMessage, GenerationResult
+from model_runtime import ChatSession, Message
+
 from fieldguide_ai.errors import ConfigurationError
 from fieldguide_ai.vectorstore import VectorSearcher, VectorSearchResult
-
-
-class ChatSession(Protocol):
-    """Conversation behavior required by retrieval orchestration."""
-
-    def chat(self, message: str | ChatMessage) -> str:
-        """Send and record one conversation turn."""
-        ...
-
-    def complete_turn(
-        self,
-        message: str | ChatMessage,
-        *,
-        generation_message: ChatMessage | None = None,
-    ) -> GenerationResult:
-        """Generate and atomically record a conversation turn."""
-        ...
 
 
 @dataclass(frozen=True)
@@ -55,19 +38,16 @@ class KnowledgeBot:
         if top_k <= 0:
             raise ConfigurationError("top_k must be greater than zero")
         if self._vector_store is None:
-            return KnowledgeAnswer(self._provider.chat(question), ())
+            return KnowledgeAnswer(self._provider.chat_sync(question), ())
 
         sources = self._vector_store.query(question, n_results=top_k)
         if not sources:
-            return KnowledgeAnswer(self._provider.chat(question), ())
+            return KnowledgeAnswer(self._provider.chat_sync(question), ())
 
         augmented_question = _build_augmented_question(question, sources)
-        result = self._provider.complete_turn(
+        result = self._provider.complete_turn_sync(
             question,
-            generation_message=ChatMessage(
-                role="user",
-                content=augmented_question,
-            ),
+            generation_message=Message.user(augmented_question),
         )
         return KnowledgeAnswer(result.text, tuple(sources))
 

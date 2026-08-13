@@ -1,63 +1,88 @@
-"""Tests for the LLM provider registry."""
+"""Tests for the LLM provider registry and runtime composition."""
 
-import os
 import unittest
 from dataclasses import replace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
+
+from model_runtime import ChatSession, ProviderUnavailableError
 
 from fieldguide_ai.providers import (
-    ModelRuntimeProvider,
     ProviderRegistry,
     ProviderSpec,
     build_provider,
     create_provider_registry,
     get_provider,
 )
+from tests.session_fakes import (
+    FakeChatModel,
+    RecordingAdapterFactory,
+    selected_model,
+)
+
+
+def fake_spec(
+    adapter: FakeChatModel | None = None,
+    *,
+    name: str = "fake",
+    label: str = "Fake",
+    api_key: str | None = "test-key",
+) -> tuple[ProviderSpec, RecordingAdapterFactory]:
+    """Build a provider spec and its recording adapter factory."""
+    selected_adapter = adapter or FakeChatModel(discovered_models=("fake-model",))
+    factory = RecordingAdapterFactory(selected_adapter)
+    return (
+        ProviderSpec(
+            name=name,
+            label=label,
+            models=("fake-model", "fallback-model"),
+            default_model="fake-model",
+            adapter_factory=factory,
+            api_key=api_key,
+            credential_name="FAKE_API_KEY",
+        ),
+        factory,
+    )
 
 
 class ProviderRegistryTest(unittest.TestCase):
-    """Verify provider metadata and construction."""
+    """Verify provider metadata, discovery, and session construction."""
 
     def test_anthropic_default_is_a_registered_api_model_id(self) -> None:
-        """The Anthropic default should be selectable and API-compatible."""
         spec = get_provider("anthropic")
 
         self.assertEqual(spec.default_model, "claude-haiku-4-5-20251001")
         self.assertIn(spec.default_model, spec.models)
 
-    def test_available_models_prefers_provider_discovery(self) -> None:
-        """Model discovery should replace the configured fallback choices."""
-        discovered_models = ["model-b", "model-a"]
-        backend = Mock()
-        backend.list_models.return_value = discovered_models
-        spec = replace(
-            get_provider("anthropic"),
-            backend=backend,
+    def test_available_models_prefers_adapter_discovery(self) -> None:
+        spec, factory = fake_spec(
+            FakeChatModel(discovered_models=("model-b", "model-a", "model-b"))
         )
 
         models = spec.available_models()
 
         self.assertEqual(models, ("model-b", "model-a"))
+        self.assertEqual(factory.api_keys, ["test-key"])
 
     def test_available_models_uses_fallback_when_discovery_is_empty(self) -> None:
-        """An empty discovery response should retain configured choices."""
-        backend = Mock()
-        backend.list_models.return_value = []
-        spec = replace(get_provider("anthropic"), backend=backend)
+        spec, _ = fake_spec(FakeChatModel(discovered_models=()))
 
-        models = spec.available_models()
+        self.assertEqual(spec.available_models(), spec.models)
 
-        self.assertEqual(models, spec.models)
+    def test_discovery_preserves_normalized_runtime_errors(self) -> None:
+        discovery_error = ProviderUnavailableError(
+            "discovery failed",
+            retryable=False,
+            provider="fake",
+        )
+        spec, _ = fake_spec(FakeChatModel(discovery_error=discovery_error))
+
+        with self.assertRaises(ProviderUnavailableError) as raised:
+            spec.available_models()
+
+        self.assertIs(raised.exception, discovery_error)
 
     def test_registry_rejects_duplicate_names(self) -> None:
-        backend = Mock()
-        first = ProviderSpec(
-            name="duplicate",
-            label="First",
-            models=("model",),
-            default_model="model",
-            backend=backend,
-        )
+        first, _ = fake_spec()
         second = replace(first, label="Second")
 
         with self.assertRaisesRegex(ValueError, "duplicate provider registration"):
@@ -70,83 +95,52 @@ class ProviderRegistryTest(unittest.TestCase):
                 label="Invalid",
                 models=("available",),
                 default_model="missing",
-                backend=Mock(),
+                adapter_factory=RecordingAdapterFactory(FakeChatModel()),
+                api_key="test-key",
             )
 
-    def test_runtime_backend_requires_a_provider_api_key(self) -> None:
+    def test_provider_spec_requires_api_key_before_adapter_construction(self) -> None:
+        spec, factory = fake_spec(api_key=None)
+
+        with self.assertRaisesRegex(ValueError, "FAKE_API_KEY is not set"):
+            spec.build_provider()
+
+        self.assertEqual(factory.api_keys, [])
+
+    @patch("fieldguide_ai.providers.registry.OpenAIAdapter")
+    def test_openai_discovery_uses_async_runtime_adapter(
+        self,
+        adapter_type: Mock,
+    ) -> None:
+        adapter_type.return_value.list_models = AsyncMock(
+            return_value=["model-a", "model-b"]
+        )
         registry = create_provider_registry(
-            openai_api_key=None,
+            openai_api_key="test-key",
             anthropic_api_key=None,
         )
 
-        with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY is not set"):
-            registry.get("openai").build_provider()
-
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})
-    @patch("fieldguide_ai.providers.runtime_provider.OpenAI")
-    @patch("fieldguide_ai.providers.runtime_provider.OpenAIAdapter")
-    def test_openai_discovery_does_not_construct_a_chat_provider(
-        self,
-        provider_type: Mock,
-        openai_client_type: Mock,
-    ) -> None:
-        """Discovery should use the SDK client without selecting a chat model."""
-        openai_client_type.return_value.models.list.return_value.data = [
-            Mock(id="model-b"),
-            Mock(id="model-a"),
-        ]
-
-        models = get_provider("openai").available_models()
+        models = registry.get("openai").available_models()
 
         self.assertEqual(models, ("model-a", "model-b"))
-        openai_client_type.assert_called_once_with(api_key="test-key")
-        provider_type.assert_not_called()
+        adapter_type.assert_called_once_with(api_key="test-key")
 
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("fieldguide_ai.providers.runtime_provider.Anthropic")
-    @patch("fieldguide_ai.providers.runtime_provider.AnthropicAdapter")
-    def test_anthropic_discovery_does_not_construct_a_chat_provider(
-        self,
-        provider_type: Mock,
-        anthropic_client_type: Mock,
-    ) -> None:
-        """Discovery should use the SDK client without selecting a chat model."""
-        anthropic_client_type.return_value.models.list.return_value.data = [
-            Mock(id="model-b"),
-            Mock(id="model-a"),
-        ]
+    def test_factory_builds_chat_session_for_selected_model(self) -> None:
+        spec, factory = fake_spec()
+        registry = ProviderRegistry([spec])
 
-        models = get_provider("anthropic").available_models()
+        provider = build_provider("fake", "fallback-model", registry)
 
-        self.assertEqual(models, ("model-a", "model-b"))
-        anthropic_client_type.assert_called_once_with(api_key="test-key")
-        provider_type.assert_not_called()
+        self.assertIsInstance(provider, ChatSession)
+        self.assertEqual(provider.route, "fake")
+        self.assertEqual(selected_model(provider), "fallback-model")
+        self.assertEqual(factory.api_keys, ["test-key"])
 
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
-    @patch("fieldguide_ai.providers.runtime_provider.AnthropicAdapter")
-    def test_anthropic_factory_forwards_selected_model(
-        self,
-        anthropic_adapter_type: Mock,
-    ) -> None:
-        """The Anthropic factory should retain the selected model ID."""
-        provider = build_provider("anthropic", "claude-sonnet-5")
+    def test_unknown_provider_raises_configuration_error(self) -> None:
+        spec, _ = fake_spec()
 
-        self.assertIsInstance(provider, ModelRuntimeProvider)
-        self.assertEqual(provider.model, "claude-sonnet-5")
-        anthropic_adapter_type.assert_called_once_with(api_key="test-key")
-
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})
-    @patch("fieldguide_ai.providers.runtime_provider.OpenAIAdapter")
-    def test_openai_factory_forwards_selected_model(
-        self,
-        openai_adapter_type: Mock,
-    ) -> None:
-        """The OpenAI factory should retain the selected model ID."""
-        provider = build_provider("openai", "gpt-5-mini")
-
-        self.assertIsInstance(provider, ModelRuntimeProvider)
-        self.assertEqual(provider.model, "gpt-5-mini")
-        openai_adapter_type.assert_called_once_with(api_key="test-key")
+        with self.assertRaisesRegex(ValueError, "unsupported LLM provider: unknown"):
+            get_provider("unknown", ProviderRegistry([spec]))
 
 
 if __name__ == "__main__":

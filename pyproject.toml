@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-model-runtime = { git = "https://github.com/MeetPatel89/model-runtime.git", tag = "v0.1.0" }
+model-runtime = { git = "https://github.com/MeetPatel89/model-runtime.git", tag = "v0.2.0" }
 
 [project.scripts]
 fieldguide = "fieldguide_ai.interactive:main"
@@ -71,16 +71,18 @@ line-ending = "lf"
 
 [tool.pyright]
 include = [
-    "fieldguide_ai/chat/generation.py",
-    "fieldguide_ai/chat/messages.py",
+    "fieldguide_ai/cli.py",
+    "fieldguide_ai/interactive.py",
+    "fieldguide_ai/knowledge_bot.py",
     "fieldguide_ai/providers",
+    "fieldguide_ai/terminal.py",
 ]
 pythonVersion = "3.14"
 typeCheckingMode = "standard"
 venv = ".venv"
 venvPath = "."
 strict = [
-    "fieldguide_ai/chat/generation.py",
-    "fieldguide_ai/chat/messages.py",
-    "fieldguide_ai/providers/base.py",
+    "fieldguide_ai/providers/registry.py",
+    "fieldguide_ai/knowledge_bot.py",
+    "fieldguide_ai/terminal.py",
 ]

@@ -7,15 +7,15 @@ from typing import TextIO
 
 import questionary
 from dotenv import load_dotenv
+from model_runtime import ChatSession, Message, ModelRuntimeError
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from fieldguide_ai.chat import ChatMessage
 from fieldguide_ai.config import DEFAULT_SYSTEM_PROMPT, SessionConfig
-from fieldguide_ai.errors import FieldguideError
+from fieldguide_ai.errors import ConfigurationError, FieldguideError
 from fieldguide_ai.ingestion import (
     DocumentIndexingPipeline,
     IndexingResult,
@@ -23,7 +23,6 @@ from fieldguide_ai.ingestion import (
 )
 from fieldguide_ai.knowledge_bot import KnowledgeAnswer, KnowledgeBot
 from fieldguide_ai.providers import (
-    LLMProvider,
     ProviderRegistry,
     ProviderSpec,
     registry_from_environment,
@@ -88,7 +87,7 @@ def _available_models(
 ) -> tuple[str, ...]:
     try:
         return provider_spec.available_models()
-    except FieldguideError as error:
+    except (FieldguideError, ModelRuntimeError) as error:
         print(
             f"Could not load current {provider_spec.label} models: {error}. "
             "Using configured models.",
@@ -222,11 +221,11 @@ def index_corpus(
 def _build_provider(
     provider_spec: ProviderSpec,
     config: SessionConfig,
-    history: list[ChatMessage] | None = None,
-) -> LLMProvider:
+    history: Sequence[Message] | None = None,
+) -> ChatSession:
     return provider_spec.build_provider(
         config.model,
-        message_history=history,
+        history=history,
         system_prompt=config.system_prompt,
     )
 
@@ -310,7 +309,7 @@ def _show_sources(console: Console, sources: Sequence[VectorSearchResult]) -> No
 
 
 def run_chat_loop(
-    provider: LLMProvider,
+    provider: ChatSession,
     input_stream: TextIO = sys.stdin,
     output_stream: TextIO = sys.stdout,
     system_prompt: str | None = None,
@@ -375,9 +374,7 @@ def run_chat_loop(
                 continue
             provider_spec, model = selection
             updated = config.with_provider(provider_spec.name, model)
-            provider = _build_provider(
-                provider_spec, updated, history=provider.get_history()
-            )
+            provider = _build_provider(provider_spec, updated, history=provider.history)
             config = updated
             bot = KnowledgeBot(provider, vector_store)
             _show_config(console, config)
@@ -389,9 +386,7 @@ def run_chat_loop(
                 _show_cancelled(console)
                 continue
             updated = config.with_model(model)
-            provider = _build_provider(
-                provider_spec, updated, history=provider.get_history()
-            )
+            provider = _build_provider(provider_spec, updated, history=provider.history)
             config = updated
             bot = KnowledgeBot(provider, vector_store)
             _show_config(console, config)
@@ -532,6 +527,9 @@ def main() -> None:
         print("Error: Wizard operation cancelled.", file=sys.stderr)
         sys.exit(1)
     except (EOFError, KeyboardInterrupt) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        sys.exit(1)
+    except (ConfigurationError, ModelRuntimeError) as error:
         print(f"Error: {error}", file=sys.stderr)
         sys.exit(1)
 
