@@ -29,8 +29,11 @@ fieldguide = "fieldguide_ai.interactive:main"
 [project.optional-dependencies]
 notebook = ["ipykernel"]
 dev = [
-    "pyright>=1.1.400",
-    "ruff>=0.12.0",
+    "mypy>=2.3.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.16.2",
+    "ty>=0.0.69",
 ]
 
 [build-system]
@@ -40,6 +43,13 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "fieldguide_ai"
 module-root = ""
+
+[tool.ty.src]
+include = ["src", "tests", "explore.py"]
+
+[tool.ty.rules]
+missing-type-argument = "error"
+possibly-unresolved-reference = "warn"
 
 [tool.ruff]
 line-length = 88
@@ -55,7 +65,8 @@ select = [
     "N",
     "D",
     "C4",
-    "ANN"
+    "ANN",
+    "PYI",
 ]
 
 [tool.ruff.lint.pydocstyle]
@@ -69,20 +80,15 @@ quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
 
-[tool.pyright]
-include = [
-    "fieldguide_ai/cli.py",
-    "fieldguide_ai/interactive.py",
-    "fieldguide_ai/knowledge_bot.py",
-    "fieldguide_ai/providers",
-    "fieldguide_ai/terminal.py",
-]
-pythonVersion = "3.14"
-typeCheckingMode = "standard"
-venv = ".venv"
-venvPath = "."
-strict = [
-    "fieldguide_ai/providers/registry.py",
-    "fieldguide_ai/knowledge_bot.py",
-    "fieldguide_ai/terminal.py",
-]
+[tool.mypy]
+files = ["src", "tests", "example.py"]
+python_version = "3.14"
+plugins = ["pydantic.mypy"]
+strict = true
+enable_error_code = ["explicit-override"]
+show_error_codes = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = false
+init_typed = false
+warn_required_dynamic_aliases = true
