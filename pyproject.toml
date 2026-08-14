@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-model-runtime = { git = "https://github.com/MeetPatel89/model-runtime.git", tag = "v0.2.0" }
+model-runtime = { git = "https://github.com/MeetPatel89/model-runtime.git", tag = "v0.2.1" }
 
 [project.scripts]
 fieldguide = "fieldguide_ai.interactive:main"
