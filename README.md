@@ -18,9 +18,15 @@ Install the project from the repository root:
 uv sync
 ```
 
-The lockfile resolves `model-runtime` from the `v0.2.0` Git tag.
+The lockfile resolves `model-runtime` from the `v0.2.1` Git tag and `vectorstore-ai[chroma,faiss,postgres]` from `v0.1.0`. Chroma, FAISS, and the Postgres driver are installed through the `vectorstore-ai` extras.
 
-Create a local `.env` file:
+If you do not already have a local `.env` file, copy the example:
+
+```bash
+cp .env.example .env
+```
+
+Fill in the provider keys you need:
 
 ```dotenv
 OPENAI_API_KEY=your-api-key
@@ -36,6 +42,24 @@ uv run fieldguide
 ```
 
 The styled wizard prompts for an LLM provider and model, an optional vector store, a system prompt, and optional Markdown ingestion. During chat it retrieves relevant chunks, adds them to the model context, and displays their document and section as sources. Choose `none (plain chat)` to chat without retrieval.
+
+### Local Postgres for the retrieval migration
+
+Phase 0 adds the shared retrieval dependency and local database setup. The current CLIs still use Fieldguide's in-tree ingestion and vector stores; catalog-backed lexical and hybrid retrieval will be wired in during later phases. Postgres is optional for the current workflows and unit tests.
+
+With Docker and the Docker Compose plugin installed, start the database and wait for its health check:
+
+```bash
+docker compose up -d --wait postgres
+```
+
+The service runs Postgres 17, listens on `127.0.0.1:5432`, and persists data in the `postgres_data` named volume. The development database, user, and password default to `fieldguide`. `.env.example` supplies the matching `POSTGRES_CONNECTIONSTRING` for vectorstore-ai's document catalog. If you change `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, or `POSTGRES_PORT`, update the connection string to match. Database credentials are applied when the volume is first initialized.
+
+Stop the service while keeping its data:
+
+```bash
+docker compose down
+```
 
 ## What it does
 
@@ -241,6 +265,7 @@ This describes observable state and tool flow; it does not expose hidden model r
 | Maximum chunk size | `900` words | Large sections use overlapping splits. |
 | `OPENAI_API_KEY` | None | Required before constructing OpenAI chat or embedding clients. |
 | `ANTHROPIC_API_KEY` | None | Required before constructing an Anthropic chat client. |
+| `POSTGRES_CONNECTIONSTRING` | None | `.env.example` provides the local Compose DSN; reserved for the upcoming vectorstore-ai catalog integration. |
 
 ## Testing and quality checks
 
@@ -306,6 +331,8 @@ Do not interpret passing unit tests as evidence of answer quality or production 
 ```text
 .
 ├── .cursor/rules/          # Project rules, including README maintenance
+├── .env.example            # Provider keys and local Postgres configuration
+├── docker-compose.yml      # Optional local Postgres for the retrieval migration
 ├── data/corpora/nautilus/  # Synthetic ITSM Markdown corpus plus CSV demos
 │   ├── source_of_truth/    # facts.yaml consistency contract (payments stack, KIs, routing)
 │   ├── manifests/          # document_manifest_v0.yaml (history) and document_manifest_v2.yaml
