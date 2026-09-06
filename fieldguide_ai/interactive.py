@@ -57,7 +57,8 @@ CHAT_COMMANDS = (
 
 def _ask(question: questionary.Question) -> object | None:
     """Ask a question, returning ``None`` when the user cancels."""
-    return question.ask()
+    answer: object = question.ask()
+    return answer
 
 
 def _ask_text(question: questionary.Question) -> str | None:
@@ -176,7 +177,7 @@ def _prompt_store(
         return None
     collection_name = DEFAULT_COLLECTION_NAME
     if choice == "chroma":
-        collection_name = _ask_text(
+        selected_collection = _ask_text(
             questionary.text(
                 "Chroma collection name:",
                 default=(
@@ -184,8 +185,9 @@ def _prompt_store(
                 ),
             )
         )
-        if collection_name is None:
+        if selected_collection is None:
             return None
+        collection_name = selected_collection
     return choice, store_path, collection_name
 
 
@@ -381,22 +383,22 @@ def run_chat_loop(
             continue
         if command == ":model":
             provider_spec = provider_registry.get(config.provider_name)
-            model = _prompt_model(provider_spec, output_stream, config.model)
-            if model is None:
+            selected_model = _prompt_model(provider_spec, output_stream, config.model)
+            if selected_model is None:
                 _show_cancelled(console)
                 continue
-            updated = config.with_model(model)
+            updated = config.with_model(selected_model)
             provider = _build_provider(provider_spec, updated, history=provider.history)
             config = updated
             bot = KnowledgeBot(provider, vector_store)
             _show_config(console, config)
             continue
         if command == ":store":
-            selection = _prompt_store(config)
-            if selection is None:
+            store_selection = _prompt_store(config)
+            if store_selection is None:
                 _show_cancelled(console)
                 continue
-            store_type, store_path, collection_name = selection
+            store_type, store_path, collection_name = store_selection
             updated = config.with_store(
                 store_type,
                 store_path,

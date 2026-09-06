@@ -3,6 +3,7 @@ import unittest
 from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import override
 
 from fieldguide_ai.ingestion.models import DocumentChunk
 from fieldguide_ai.vectorstore import EmbeddingProvider, FaissVectorStore
@@ -12,6 +13,7 @@ class FakeEmbeddingProvider(EmbeddingProvider):
     def __init__(self, embeddings: dict[str, list[float]]) -> None:
         self.embeddings = embeddings
 
+    @override
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         return [self.embeddings[text] for text in texts]
 

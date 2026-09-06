@@ -1,16 +1,19 @@
 """Chroma-backed vector-store implementation."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
+from typing import cast, override
 
 import chromadb
 import numpy as np
 from chromadb.api import ClientAPI
+from chromadb.base_types import PyVector
 
 from fieldguide_ai.errors import VectorStoreOperationError
 from fieldguide_ai.ingestion.models import DocumentChunk
 from fieldguide_ai.vectorstore.base import (
     EmbeddingProvider,
+    VectorMetadataValue,
     VectorSearchResult,
     VectorStore,
     validate_embeddings,
@@ -49,6 +52,7 @@ class ChromaVectorStore(VectorStore):
                 f"could not open Chroma collection {collection_name!r}"
             ) from error
 
+    @override
     def index_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
         """Insert or update chunks by chunk ID."""
         if not chunks:
@@ -56,6 +60,7 @@ class ChromaVectorStore(VectorStore):
         embeddings = self._embed_chunks(chunks)
         self._upsert(chunks, embeddings)
 
+    @override
     def replace_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
         """Replace all indexed chunks for the supplied documents."""
         if not chunks:
@@ -66,6 +71,7 @@ class ChromaVectorStore(VectorStore):
         self.delete_documents(_unique_doc_ids(chunks))
         self._upsert(chunks, embeddings)
 
+    @override
     def delete_documents(self, doc_ids: Sequence[str]) -> None:
         """Delete every chunk belonging to the supplied document IDs."""
         for doc_id in dict.fromkeys(doc_ids):
@@ -76,6 +82,7 @@ class ChromaVectorStore(VectorStore):
                     f"could not delete Chroma document {doc_id!r}"
                 ) from error
 
+    @override
     def query(self, query_text: str, n_results: int = 10) -> list[VectorSearchResult]:
         """Return the nearest indexed chunks in nearest-first order."""
         if n_results <= 0:
@@ -100,7 +107,15 @@ class ChromaVectorStore(VectorStore):
                     chunk_id=chunk_id,
                     content=documents[index] if index < len(documents) else "",
                     metadata=(
-                        dict(metadatas[index] or {}) if index < len(metadatas) else {}
+                        # serialize_chunk_metadata writes only scalar values.
+                        dict(
+                            cast(
+                                Mapping[str, VectorMetadataValue],
+                                metadatas[index] or {},
+                            )
+                        )
+                        if index < len(metadatas)
+                        else {}
                     ),
                     distance=(
                         float(distances[index]) if index < len(distances) else 0.0
@@ -124,10 +139,13 @@ class ChromaVectorStore(VectorStore):
         embeddings: Sequence[Sequence[float]],
     ) -> None:
         try:
+            chroma_embeddings: list[PyVector] = [
+                list(embedding) for embedding in embeddings
+            ]
             self._collection.upsert(
                 ids=[chunk.chunk_id for chunk in chunks],
                 documents=[chunk.content for chunk in chunks],
-                embeddings=[list(embedding) for embedding in embeddings],
+                embeddings=chroma_embeddings,
                 metadatas=[serialize_chunk_metadata(chunk) for chunk in chunks],
             )
         except Exception as error:

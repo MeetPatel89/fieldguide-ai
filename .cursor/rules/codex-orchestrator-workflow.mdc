@@ -10,9 +10,16 @@ of truth for the shared implementation and validation policy.
 - Codex must not run post-modification formatters, linters, static type checkers,
   or tests unless the user explicitly asks it to. This includes check-only modes,
   autofixes, targeted tests, and equivalent commands through wrappers or hooks.
-- `codex-orchestrator` applies formatting and runs configured checks after each
-  implementation or repair turn. Repair the failures it reports, then return
-  control without rerunning checks or invoking the orchestrator yourself.
+- `codex-orchestrator` checks the starting checkout before phase implementation;
+  baseline maintenance is separate from phase repairs. After each turn it runs
+  prerequisites, then formatting and all independent checks, collecting failures
+  together. A failed prerequisite stops the run without spending a repair turn.
+- Repair only regressions caused by the assigned phase and its affected contracts.
+  Return `blocked` for failures requiring unrelated or explicitly excluded work.
+  Return control without rerunning checks or invoking the orchestrator yourself.
+- Implementation and repair model choices come from the exported orchestrator
+  environment variables documented in `AGENTS.md`. Repairs may switch models while
+  retaining the phase session; do not edit Codex configuration to change models.
 - Continue writing required tests and reviewing code, tests, documentation, and
   diffs by inspection. Do not weaken tests or checks to hide failures.
 - Report checks as deferred, not passed. Outside an orchestrated run, leave their

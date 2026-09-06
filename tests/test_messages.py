@@ -23,7 +23,7 @@ class MessageIntegrationTest(unittest.TestCase):
         message = Message.assistant("Hi")
 
         with self.assertRaises(FrozenInstanceError):
-            message.role = MessageRole.USER  # type: ignore[misc]
+            message.role = MessageRole.USER  # type: ignore[misc]  # ty: ignore[invalid-assignment]
 
 
 if __name__ == "__main__":

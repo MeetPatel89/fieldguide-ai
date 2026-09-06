@@ -12,10 +12,18 @@ for Codex and the source of truth for the validation policy shared with Cursor.
   tests, full test suites, or equivalent checks through scripts, task runners,
   pre-commit hooks, or subprocesses. Examples include `ruff format`, `ruff check`,
   `mypy`, `ty check`, `pyright`, `pytest`, and `unittest`.
-- `codex-orchestrator` owns the configured validation sequence after each Codex
-  turn: implement → validate → repair → validate. It applies formatting, stops
-  validation at the first failure, sends diagnostics to the same phase session,
-  and reruns the configured sequence after a repair.
+- `codex-orchestrator` validates the starting checkout before phase implementation.
+  Baseline failures stop the run before Codex starts and are handled as separate
+  maintenance, without consuming the phase repair budget.
+- After each Codex turn, the orchestrator runs `setup_commands` in order and stops
+  if a prerequisite fails. Once setup succeeds, it applies formatting and runs all
+  independent `commands`, collecting failures into one report for the same phase
+  session. It reruns setup and all checks after each repair.
+- Repair only regressions caused by the assigned phase, including affected
+  contracts. Do not expand repairs into unrelated baseline maintenance or
+  components explicitly excluded by the plan. If a failure requires such work,
+  return `blocked` with the affected files and reason. A resumed legacy run may
+  have no recorded baseline; do not assume its failures are phase regressions.
 - Implement the requested behavior and add or update meaningful tests where
   required by the change or plan. Deferring execution does not remove test-writing
   responsibilities or allow weakening tests or checks to conceal failures.
@@ -43,6 +51,11 @@ When invoked by `codex-orchestrator`:
   only when all phase implementation requirements are fulfilled; otherwise use
   `blocked` and describe the implementation blocker. Let the orchestrator decide
   whether validation passes and the next phase can begin.
+- The orchestrator selects implementation and repair models from exported
+  `CODEX_ORCHESTRATOR_MODEL` / `CODEX_ORCHESTRATOR_REASONING_EFFORT` and
+  `CODEX_ORCHESTRATOR_REPAIR_MODEL` / `CODEX_ORCHESTRATOR_REPAIR_REASONING_EFFORT`.
+  Repairs retain the phase session but may use a different model. Do not edit
+  `.codex/config.toml` or orchestrator settings to change the assigned model.
 
 ## Python design
 

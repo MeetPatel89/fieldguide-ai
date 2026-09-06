@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -70,7 +71,7 @@ def load_dataset_specs(common_path: str) -> list[DatasetSpec]:
     return specs
 
 
-def extract_assistant_text(agent_result: dict) -> str:
+def extract_assistant_text(agent_result: dict[str, Any]) -> str:
     """Extract the latest textual AI message from an agent result."""
     messages = agent_result.get("messages", [])
     for message in reversed(messages):

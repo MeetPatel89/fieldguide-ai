@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Literal
+from typing import Any, Literal
 
 import pandas as pd
 from langchain.tools import tool
+from langchain_core.tools import BaseTool
+from pandas.core.groupby.generic import DataFrameGroupBy
 from pydantic import BaseModel, Field
 
 from langchain_pandas.catalog import DataframeCatalog, DatasetEntry
@@ -102,7 +104,7 @@ class DistinctValuesInput(BaseModel):
     limit: int = Field(default=20, ge=1, le=MAX_DISTINCT_VALUES)
 
 
-def build_tools(catalog: DataframeCatalog) -> list[object]:
+def build_tools(catalog: DataframeCatalog) -> list[BaseTool]:
     """Build dataframe-query tools bound to a catalog."""
 
     @tool
@@ -164,7 +166,7 @@ def build_tools(catalog: DataframeCatalog) -> list[object]:
         if not normalized_query:
             return "Search query must be non-empty."
         entries = [catalog.get(dataset_name)] if dataset_name else catalog.all()
-        matches: list[tuple[int, DatasetEntry, pd.Series]] = []
+        matches: list[tuple[int, DatasetEntry, pd.Series[Any]]] = []
         query_tokens = {
             token.lower() for token in normalized_query.split() if token.strip()
         }
@@ -332,13 +334,13 @@ def _string_columns(dataframe: pd.DataFrame) -> list[str]:
     ]
 
 
-def _row_identifier(entry: DatasetEntry, row: pd.Series) -> str:
+def _row_identifier(entry: DatasetEntry, row: pd.Series[Any]) -> str:
     if entry.id_column and entry.id_column in row:
         return f"{entry.id_column}={row[entry.id_column]}"
     return f"row_index={row.name}"
 
 
-def _row_excerpt(entry: DatasetEntry, row: pd.Series, max_fields: int = 3) -> str:
+def _row_excerpt(entry: DatasetEntry, row: pd.Series[Any], max_fields: int = 3) -> str:
     fields: list[str] = []
     for column in row.index:
         if entry.id_column and column == entry.id_column:
@@ -397,7 +399,7 @@ def _apply_filters(
 
 
 def _grouped_metric(
-    grouped: pd.core.groupby.generic.DataFrameGroupBy,
+    grouped: DataFrameGroupBy[Any, Literal[True]],
     metric: str,
     metric_column: str | None,
 ) -> pd.DataFrame:
@@ -405,18 +407,21 @@ def _grouped_metric(
         return grouped.size().reset_index(name="count")
     assert metric_column is not None
     aggregator = getattr(grouped[metric_column], metric)
-    return aggregator().reset_index(name=f"{metric}_{metric_column}")
+    result: pd.DataFrame = aggregator().reset_index(name=f"{metric}_{metric_column}")
+    return result
 
 
 def _scalar_metric(
     dataframe: pd.DataFrame,
     metric: str,
     metric_column: str | None,
-) -> int | float:
+) -> object:
+    """Return an aggregate scalar, including nonnumeric values from min/max."""
     if metric == "count":
         return int(len(dataframe))
     assert metric_column is not None
     value = getattr(dataframe[metric_column], metric)()
     if pd.isna(value):
         return float("nan")
-    return value
+    result: object = value
+    return result

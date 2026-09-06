@@ -1,9 +1,12 @@
 """Tests for the rich interactive Fieldguide workflow."""
 
 import io
+import sys
 import unittest
+from typing import override
 from unittest.mock import MagicMock, Mock, patch
 
+import questionary
 from model_runtime import ChatSession, Message, ProviderUnavailableError
 
 from fieldguide_ai import interactive
@@ -87,6 +90,7 @@ class ProviderRegistryTest(unittest.TestCase):
 class InteractiveWizardTest(unittest.TestCase):
     """Verify wizard choices, chat rendering, and live reconfiguration."""
 
+    @override
     def setUp(self) -> None:
         self.adapter = FakeChatModel(
             response_text="response",
@@ -112,18 +116,16 @@ class InteractiveWizardTest(unittest.TestCase):
 
         with (
             patch.object(
-                interactive.questionary,
+                questionary,
                 "select",
                 side_effect=[Answer("OpenAI"), Answer("gpt-5-mini"), Answer("numpy")],
             ),
             patch.object(
-                interactive.questionary,
+                questionary,
                 "text",
                 side_effect=[Answer("custom.npz"), Answer("Use indexed knowledge.")],
             ),
-            patch.object(
-                interactive.questionary, "confirm", return_value=Answer(False)
-            ),
+            patch.object(questionary, "confirm", return_value=Answer(False)),
             patch.object(
                 interactive, "OpenAIEmbeddingProvider", return_value=embedding_provider
             ),
@@ -157,7 +159,7 @@ class InteractiveWizardTest(unittest.TestCase):
 
         with (
             patch.object(
-                interactive.questionary,
+                questionary,
                 "select",
                 side_effect=[
                     Answer("OpenAI"),
@@ -166,11 +168,11 @@ class InteractiveWizardTest(unittest.TestCase):
                 ],
             ),
             patch.object(
-                interactive.questionary,
+                questionary,
                 "text",
                 return_value=Answer("Plain chat prompt"),
             ),
-            patch.object(interactive.questionary, "confirm") as confirm,
+            patch.object(questionary, "confirm") as confirm,
             patch.object(interactive, "OpenAIEmbeddingProvider") as embedding_type,
             patch.object(interactive, "run_chat_loop") as run_chat_loop,
         ):
@@ -191,7 +193,7 @@ class InteractiveWizardTest(unittest.TestCase):
 
         with (
             patch.object(
-                interactive.questionary,
+                questionary,
                 "select",
                 side_effect=[
                     Answer("OpenAI"),
@@ -200,7 +202,7 @@ class InteractiveWizardTest(unittest.TestCase):
                 ],
             ),
             patch.object(
-                interactive.questionary,
+                questionary,
                 "text",
                 side_effect=[
                     Answer("custom-model"),
@@ -210,7 +212,7 @@ class InteractiveWizardTest(unittest.TestCase):
                     Answer("450"),
                 ],
             ),
-            patch.object(interactive.questionary, "confirm", return_value=Answer(True)),
+            patch.object(questionary, "confirm", return_value=Answer(True)),
             patch.object(interactive, "OpenAIEmbeddingProvider", return_value=Mock()),
             patch.object(interactive, "build_vector_store", return_value=vector_store),
             patch.object(interactive, "index_corpus") as index_corpus,
@@ -307,7 +309,7 @@ class InteractiveWizardTest(unittest.TestCase):
 
         with (
             patch.object(
-                interactive.questionary,
+                questionary,
                 "select",
                 side_effect=[
                     Answer("gpt-5-mini"),
@@ -317,7 +319,7 @@ class InteractiveWizardTest(unittest.TestCase):
                 ],
             ),
             patch.object(
-                interactive.questionary,
+                questionary,
                 "text",
                 return_value=Answer("Updated prompt"),
             ),
@@ -369,7 +371,7 @@ class InteractiveWizardTest(unittest.TestCase):
         output_stream = io.StringIO()
 
         with patch.object(
-            interactive.questionary,
+            questionary,
             "select",
             return_value=Answer(None),
         ):
@@ -394,7 +396,7 @@ class InteractiveWizardTest(unittest.TestCase):
         run_wizard: Mock,
     ) -> None:
         with (
-            patch.object(interactive.sys, "stderr"),
+            patch.object(sys, "stderr"),
             self.assertRaisesRegex(SystemExit, "1"),
         ):
             interactive.main()

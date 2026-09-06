@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import override
 from unittest.mock import Mock
 
 import numpy as np
@@ -24,6 +25,7 @@ class FakeEmbeddingProvider(EmbeddingProvider):
         self.embeddings = embeddings
         self.calls: list[list[str]] = []
 
+    @override
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         self.calls.append(list(texts))
         return [self.embeddings[text] for text in texts]
@@ -43,7 +45,7 @@ class VectorSearchResultTest(unittest.TestCase):
 
         self.assertEqual(result.metadata["source_path"], "docs/original.md")
         with self.assertRaises(TypeError):
-            result.metadata["source_path"] = "docs/changed.md"  # type: ignore[index]
+            result.metadata["source_path"] = "docs/changed.md"  # type: ignore[index]  # ty: ignore[invalid-assignment]
 
 
 def make_chunk(
@@ -113,6 +115,7 @@ class OpenAIEmbeddingProviderTest(unittest.TestCase):
 
 
 class ChromaVectorStoreTest(unittest.TestCase):
+    @override
     def setUp(self) -> None:
         self.collection = Mock()
         self.client = Mock()

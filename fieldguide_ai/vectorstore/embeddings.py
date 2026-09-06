@@ -1,6 +1,7 @@
 """Embedding providers for vector-store implementations."""
 
 from collections.abc import Sequence
+from typing import override
 
 from openai import OpenAI
 
@@ -29,6 +30,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         self._model = model
         self._client = client if client is not None else OpenAI(api_key=api_key)
 
+    @override
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed a batch of texts in input order."""
         if not texts:

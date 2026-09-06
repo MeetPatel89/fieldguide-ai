@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any
+from typing import Any, override
 
 import numpy as np
 from numpy.typing import NDArray
@@ -46,6 +46,7 @@ class NumpyVectorStore(VectorStore):
         if self._path is not None and self._path.exists():
             self._records = self._load(self._path)
 
+    @override
     def index_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
         """Insert or update chunks by chunk ID."""
         if not chunks:
@@ -55,6 +56,7 @@ class NumpyVectorStore(VectorStore):
         records.update(new_records)
         self._commit(records)
 
+    @override
     def replace_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
         """Replace all indexed chunks for the supplied documents."""
         if not chunks:
@@ -70,6 +72,7 @@ class NumpyVectorStore(VectorStore):
         records.update(new_records)
         self._commit(records)
 
+    @override
     def delete_documents(self, doc_ids: Sequence[str]) -> None:
         """Delete every chunk belonging to the supplied document IDs."""
         deleted_doc_ids = set(doc_ids)
@@ -83,6 +86,7 @@ class NumpyVectorStore(VectorStore):
         if len(records) != len(self._records):
             self._commit(records)
 
+    @override
     def query(self, query_text: str, n_results: int = 10) -> list[VectorSearchResult]:
         """Return the nearest indexed chunks in nearest-first order."""
         if n_results <= 0:

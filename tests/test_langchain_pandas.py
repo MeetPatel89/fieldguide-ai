@@ -1,8 +1,10 @@
 import unittest
 from pathlib import Path
+from typing import ClassVar, override
 
 import pandas as pd
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.tools import BaseTool
 
 from langchain_pandas import (
     DataframeCatalog,
@@ -15,7 +17,11 @@ DATA_DIR = Path("data/corpora/nautilus/misc")
 
 
 class LangchainPandasTest(unittest.TestCase):
+    catalog: ClassVar[DataframeCatalog]
+    tools: ClassVar[dict[str, BaseTool]]
+
     @classmethod
+    @override
     def setUpClass(cls) -> None:
         cls.catalog = DataframeCatalog.from_specs(
             [

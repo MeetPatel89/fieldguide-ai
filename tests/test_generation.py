@@ -40,7 +40,7 @@ class GenerationRecordIntegrationTest(unittest.TestCase):
         )
 
         with self.assertRaises(FrozenInstanceError):
-            record.model = "changed"  # type: ignore[misc]
+            record.model = "changed"  # type: ignore[misc]  # ty: ignore[invalid-assignment]
 
 
 if __name__ == "__main__":

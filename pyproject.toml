@@ -28,8 +28,11 @@ fieldguide = "fieldguide_ai.interactive:main"
 
 [project.optional-dependencies]
 notebook = ["ipykernel"]
+
+[dependency-groups]
 dev = [
     "mypy>=2.3.0",
+    "pandas-stubs>=3.0.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.16.2",
@@ -45,7 +48,13 @@ module-name = "fieldguide_ai"
 module-root = ""
 
 [tool.ty.src]
-include = ["src", "tests", "explore.py"]
+include = [
+    "fieldguide_ai",
+    "langchain_pandas",
+    "tests",
+    "main.py",
+    "langchain_main.py",
+]
 
 [tool.ty.rules]
 missing-type-argument = "error"
@@ -81,7 +90,13 @@ indent-style = "space"
 line-ending = "lf"
 
 [tool.mypy]
-files = ["src", "tests", "example.py"]
+files = [
+    "fieldguide_ai",
+    "langchain_pandas",
+    "tests",
+    "main.py",
+    "langchain_main.py",
+]
 python_version = "3.14"
 plugins = ["pydantic.mypy"]
 strict = true
@@ -94,8 +109,10 @@ init_typed = false
 warn_required_dynamic_aliases = true
 
 [tool.codex-orchestrator]
-commands = [
+setup_commands = [
   ["uv", "sync", "--locked"],
+]
+commands = [
   ["uv", "run", "--no-sync", "ruff", "format", "."],
   ["uv", "run", "--no-sync", "ruff", "check", "."],
   ["uv", "run", "--no-sync", "mypy"],

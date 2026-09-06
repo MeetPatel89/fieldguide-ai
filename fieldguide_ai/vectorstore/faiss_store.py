@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any
+from typing import Any, override
 
 import faiss
 import numpy as np
@@ -48,6 +48,7 @@ class FaissVectorStore(VectorStore):
         self._records: dict[int, _StoredChunk] = {}
         self._load_if_present()
 
+    @override
     def index_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
         """Insert or update chunks by chunk ID."""
         if not chunks:
@@ -55,6 +56,7 @@ class FaissVectorStore(VectorStore):
         embeddings = self._embed_chunks(chunks)
         self._upsert(chunks, embeddings, removed_doc_ids=set())
 
+    @override
     def replace_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
         """Replace every indexed chunk belonging to the supplied documents."""
         if not chunks:
@@ -66,6 +68,7 @@ class FaissVectorStore(VectorStore):
             removed_doc_ids={chunk.doc_id for chunk in chunks},
         )
 
+    @override
     def delete_documents(self, doc_ids: Sequence[str]) -> None:
         """Delete every chunk belonging to the supplied document IDs."""
         deleted_doc_ids = set(doc_ids)
@@ -78,10 +81,13 @@ class FaissVectorStore(VectorStore):
         }
         removed_ids = set(self._records) - set(records)
         if removed_ids:
+            assert self._index is not None
             index = faiss.clone_index(self._index)
-            index.remove_ids(np.asarray(sorted(removed_ids), dtype=np.int64))
+            ids = np.asarray(sorted(removed_ids), dtype=np.int64)
+            index.remove_ids(faiss.IDSelectorBatch(ids))
             self._commit(index, records)
 
+    @override
     def query(self, query_text: str, n_results: int = 10) -> list[VectorSearchResult]:
         """Return nearest chunks by cosine distance in nearest-first order."""
         if n_results <= 0:
@@ -161,12 +167,14 @@ class FaissVectorStore(VectorStore):
         }
         removed_ids = set(self._records) - set(records)
 
+        index: faiss.Index
         if self._index is None:
             index = faiss.IndexIDMap2(faiss.IndexFlatIP(embeddings.shape[1]))
         else:
             index = faiss.clone_index(self._index)
             if removed_ids:
-                index.remove_ids(np.asarray(sorted(removed_ids), dtype=np.int64))
+                ids = np.asarray(sorted(removed_ids), dtype=np.int64)
+                index.remove_ids(faiss.IDSelectorBatch(ids))
 
         existing_ids = {
             record.chunk_id: numeric_id for numeric_id, record in self._records.items()

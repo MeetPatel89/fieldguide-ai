@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from langchain.agents import create_agent
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
+from langgraph.graph.state import CompiledStateGraph
 
 from langchain_pandas.catalog import DataframeCatalog
 from langchain_pandas.tools import build_tools
 
 
 def create_pandas_like_agent(
-    model: object,
+    model: str | BaseChatModel,
     catalog: DataframeCatalog,
     system_prompt: SystemMessage | None = None,
     debug: bool = False,
-) -> object:
+) -> CompiledStateGraph[Any, None, Any, Any]:
     """Create an agent equipped with tools for a dataframe catalog."""
     prompt = system_prompt or _default_system_prompt(catalog)
     return create_agent(

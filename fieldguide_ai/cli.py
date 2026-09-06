@@ -35,6 +35,7 @@ from fieldguide_ai.vectorstore import (
 from fieldguide_ai.vectorstore import (
     build_vector_store as build_configured_vector_store,
 )
+from fieldguide_ai.vectorstore.base import DocumentIndex
 
 DEFAULT_MODEL = OPENAI_DEFAULT_MODEL
 EXIT_COMMANDS = {":exit", ":q", ":quit", "exit", "quit"}
@@ -163,7 +164,7 @@ def preview_chunks(
 
 def index_corpus(
     corpus_path: str | Path,
-    vector_store: VectorStore,
+    vector_store: DocumentIndex,
     max_words: int,
     output_stream: TextIO = sys.stdout,
 ) -> IndexingResult:
@@ -282,6 +283,7 @@ def _run_main(argv: list[str] | None = None) -> None:
     load_dotenv()
     args = parse_args(argv)
     provider_registry = registry_from_environment()
+    vector_store: VectorStore | None
 
     if args.chunk_corpus:
         preview_chunks(

@@ -20,6 +20,8 @@ uv sync
 
 The lockfile resolves `model-runtime` from the `v0.2.1` Git tag and `vectorstore-ai[chroma,faiss,postgres]` from `v0.1.0`. Chroma, FAISS, and the Postgres driver are installed through the `vectorstore-ai` extras.
 
+`uv sync` also installs the default `dev` dependency group, including Ruff, mypy, and pytest. Use `uv sync --no-dev` for a runtime-only environment. Development tools use a dependency group rather than an optional package extra, so the orchestrator's `uv sync --locked` retains the tools required by its checks.
+
 If you do not already have a local `.env` file, copy the example:
 
 ```bash
@@ -45,7 +47,7 @@ The styled wizard prompts for an LLM provider and model, an optional vector stor
 
 ### Local Postgres for the retrieval migration
 
-Phase 0 adds the shared retrieval dependency and local database setup. The current CLIs still use Fieldguide's in-tree ingestion and vector stores; catalog-backed lexical and hybrid retrieval will be wired in during later phases. Postgres is optional for the current workflows and unit tests.
+The shared retrieval dependency, local database setup, and Python retrieval composition layer are available. The current CLIs still use Fieldguide's in-tree ingestion and vector stores; catalog-backed lexical and hybrid retrieval will be wired into those workflows during later phases. Postgres is optional for the current CLI workflows and unit tests.
 
 With Docker and the Docker Compose plugin installed, start the database and wait for its health check:
 
@@ -223,8 +225,19 @@ User
 | `fieldguide_ai/providers/` | Immutable provider registry, credential checks, adapter factories, single-route runtime composition, and model discovery. |
 | `fieldguide_ai/ingestion/` | Markdown loading, frontmatter parsing, section chunking, and document replacement through a focused index boundary. |
 | `fieldguide_ai/vectorstore/` | Focused search/index interfaces, composition factory, embedding abstraction, and Chroma/NumPy/FAISS persistence. |
+| `fieldguide_ai/retrieval/` | Composes vectorstore-ai embedders, stores, Postgres catalogs, and dense/lexical/hybrid retrievers; converts hits into source records and diagnostics. Available as a Python API, pending CLI and ingestion integration. |
 | `fieldguide_ai/errors.py` | Application-level configuration, embedding, document-loading, and vector-store exceptions. Model failures use `ModelRuntimeError`. |
 | `langchain_pandas/` | Validated dataframe catalog with defensive snapshots and constrained inspection/query tools. |
+
+### Shared retrieval composition API
+
+`fieldguide_ai.retrieval` exports frozen `RetrievalSettings`, `RetrievalMode`, and factories for the shared library. Dense mode enables vector search, lexical mode enables catalog full-text search without constructing an embedder or vector store, and hybrid mode combines both through reciprocal rank fusion. `build_retriever(settings, top_k)` limits the final result count; it also accepts caller-owned `catalog` and `embedder` dependencies.
+
+Set `RetrievalSettings.catalog_dsn` explicitly, for example from `os.environ["POSTGRES_CONNECTIONSTRING"]`. Lexical and hybrid settings require a DSN. Dense settings can omit it when a catalog is injected, but the default `build_catalog(settings)` requires a Postgres DSN in every mode: dense hits also need catalog rows for chunk text. Schema creation is opt-in through `build_catalog(settings, initialize_schema=True)`; ordinary retriever construction does not create tables. `build_embedder(settings)` reads `OPENAI_API_KEY` unless an explicit `api_key` is supplied.
+
+The settings default to dense mode, Chroma at `chroma_db`, collection `documents`, and `text-embedding-3-small`. When choosing NumPy or FAISS, supply a dedicated directory as `store_path`, or `None` for an in-memory store. `build_store(settings, dimension)` loads an existing directory and rejects invalid indexes or incompatible vector dimensions; `persist_store(store, settings)` saves NumPy/FAISS after writes, while Chroma persists automatically. These shared-library directory formats differ from the current CLI's legacy NumPy file and FAISS file prefix. Existing legacy indexes cannot supply the catalog rows required by this API; ingestion migration and re-indexing support remain future work.
+
+`sources_from_result(result, catalog)` performs one document lookup and preserves result order, text, scores, and dense/lexical ranks. Missing document metadata leaves `source` and `title` unset. `RetrievalDiagnostics.from_result(result, mode)` retains the requested mode, degradation state, errors, selected provider, and per-stage timings.
 
 ## Observable workflows
 
@@ -265,7 +278,7 @@ This describes observable state and tool flow; it does not expose hidden model r
 | Maximum chunk size | `900` words | Large sections use overlapping splits. |
 | `OPENAI_API_KEY` | None | Required before constructing OpenAI chat or embedding clients. |
 | `ANTHROPIC_API_KEY` | None | Required before constructing an Anthropic chat client. |
-| `POSTGRES_CONNECTIONSTRING` | None | `.env.example` provides the local Compose DSN; reserved for the upcoming vectorstore-ai catalog integration. |
+| `POSTGRES_CONNECTIONSTRING` | None | `.env.example` provides the local Compose DSN; Python retrieval callers pass it into `RetrievalSettings.catalog_dsn`. The current CLIs do not consume it. |
 
 ## Testing and quality checks
 
@@ -273,8 +286,32 @@ The commands below are for manual validation. Codex follows [AGENTS.md](AGENTS.m
 and leaves post-modification formatting, linting, type checking, and test execution
 to `codex-orchestrator` unless the user explicitly asks Codex to run them. During
 orchestrated plan execution, Codex implements the assigned phase and repairs
-reported failures; the orchestrator runs its configured checks after each turn.
+reported phase regressions. The orchestrator first validates the starting checkout;
+baseline failures stop before implementation and are handled as separate maintenance.
+After each turn, it runs `setup_commands` (the locked environment sync), then all
+independent checks in `commands`, collecting failures into one repair report. A
+prerequisite failure stops without spending a phase repair turn. Codex reports a
+blocker when a repair requires unrelated or explicitly excluded work.
 Outside an orchestrated run, the user owns check execution by default.
+
+Orchestrated implementation defaults to `gpt-6-astra` with `xhigh` reasoning;
+validation repairs resume the same phase session with `gpt-5.6-luna` and `medium`
+reasoning. Override these through the shell environment, independently of model
+settings in `.codex/config.toml`:
+
+```bash
+export CODEX_ORCHESTRATOR_MODEL=gpt-6-astra
+export CODEX_ORCHESTRATOR_REASONING_EFFORT=xhigh
+export CODEX_ORCHESTRATOR_REPAIR_MODEL=gpt-5.6-luna
+export CODEX_ORCHESTRATOR_REPAIR_REASONING_EFFORT=medium
+```
+
+The orchestrator reads exported variables, not `.env` files. Resume retains saved
+model selections unless an exported variable overrides them. Sandbox and approval
+settings continue to come from Codex configuration. The terminal and each turn's
+`invocation.json` record the requested model and reasoning; validation reports list
+all passed, failed, and skipped commands with log paths. Older resumed runs that
+lack a historical baseline explicitly report it as unavailable.
 
 Run the unit test suite:
 
@@ -282,21 +319,25 @@ Run the unit test suite:
 UV_CACHE_DIR=/tmp/uv-cache uv run python -m unittest discover -s tests
 ```
 
-Run lint and formatting checks without adding development dependencies to the project:
+Run the locked lint and formatting tools:
 
 ```bash
-UV_CACHE_DIR=/tmp/uv-cache UV_TOOL_DIR=/tmp/uv-tools uvx ruff check .
-UV_CACHE_DIR=/tmp/uv-cache UV_TOOL_DIR=/tmp/uv-tools uvx ruff format --check .
+uv run --no-sync ruff check .
+uv run --no-sync ruff format --check .
 ```
 
-Install the development extras and run the static type checker:
+Sync the default development group and run the configured static type checker:
 
 ```bash
-uv sync --extra dev
-uv run pyright
+uv sync --locked
+uv run --no-sync mypy
 ```
+
+Mypy checks `fieldguide_ai/`, `langchain_pandas/`, `tests/`, `main.py`, and `langchain_main.py` with strict checking and explicit override enforcement. `ty check` uses the same source set. These targets match the current repository layout and include the retrieval composition layer. The default development group includes `pandas-stubs` for checking dataframe code against pandas' typed API.
 
 Tests cover integration with model-runtime messages and generation records, adapter discovery and dependency injection, immutable interactive configuration, KnowledgeBot context/history behavior, Markdown parsing and chunking, Chroma/NumPy/FAISS persistence and search, metadata serialization, and dataframe tools. The model-runtime repository owns the detailed atomic-session and sync-bridge contract tests.
+
+Retrieval composition tests cover mode and settings validation, credential/schema wiring, NumPy/FAISS directory persistence, Chroma configuration, lexical retrieval without embedding calls, source hydration, and diagnostics. These tests use temporary stores and mocked external services; they do not need OpenAI credentials or a running Postgres instance. End-to-end tests of the migrated ingestion and chat workflows remain future work.
 
 ## Guardrails and data handling
 
@@ -350,6 +391,7 @@ Do not interpret passing unit tests as evidence of answer quality or production 
 │   ├── ingestion/          # Markdown loading and chunking pipeline
 │   ├── config/             # Validated interactive session configuration
 │   ├── providers/          # Provider metadata, adapter factories, and registry
+│   ├── retrieval/          # Shared retrieval composition, source records, diagnostics
 │   ├── vectorstore/        # Chroma, NumPy, and FAISS vector stores
 │   ├── knowledge_bot.py    # Retrieval-grounded chat orchestration
 │   ├── errors.py           # Stable application-level error boundary
