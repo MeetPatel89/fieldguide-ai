@@ -1,9 +1,10 @@
 """Tests for the flag-based Fieldguide CLI."""
 
 import io
+import json
+import os
 import unittest
-from collections.abc import Sequence
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -16,10 +17,10 @@ from model_runtime import (
     ModelResponse,
     ProviderUnavailableError,
 )
+from vectorstore import IngestionResult
 
 from fieldguide_ai.cli import (
     DEMO_QUESTION,
-    index_corpus,
     main,
     parse_args,
     preview_chunks,
@@ -28,7 +29,7 @@ from fieldguide_ai.cli import (
     run_demo,
 )
 from fieldguide_ai.config import DEFAULT_SYSTEM_PROMPT
-from fieldguide_ai.ingestion.models import DocumentChunk
+from fieldguide_ai.retrieval import RetrievalSettings, chunk_corpus
 from tests.session_fakes import FakeChatModel, make_session
 
 
@@ -47,20 +48,6 @@ def fake_provider() -> tuple[FakeChatModel, ChatSession]:
     """Build a session whose adapter replies to the current user text."""
     adapter = FakeChatModel(response_factory=reply_to_last_user)
     return adapter, make_session(adapter)
-
-
-class FakeVectorStore:
-    """Recording vector replacement fake."""
-
-    def __init__(self) -> None:
-        self.replacements: list[list[DocumentChunk]] = []
-
-    def replace_chunks(self, chunks: Sequence[DocumentChunk]) -> None:
-        """Record replacement chunks."""
-        self.replacements.append(list(chunks))
-
-    def delete_documents(self, doc_ids: Sequence[str]) -> None:
-        """Accept unused deletion operations."""
 
 
 class CliTest(unittest.TestCase):
@@ -165,24 +152,160 @@ class CliTest(unittest.TestCase):
         self.assertIn("DOC-1::chunk-0000 [runbook]", output)
         self.assertIn("Test Doc > Summary", output)
 
-    def test_index_corpus_reports_indexed_counts(self) -> None:
+    def test_preview_details_serializes_catalog_chunk_fields(self) -> None:
         with TemporaryDirectory() as tmpdir:
             Path(tmpdir, "doc.md").write_text("# Test\n\nBody", encoding="utf-8")
             output_stream = io.StringIO()
-            store = FakeVectorStore()
-
-            result = index_corpus(
+            preview_chunks(
                 tmpdir,
-                vector_store=store,
                 max_words=900,
+                limit=1,
                 output_stream=output_stream,
+                details=True,
+            )
+            _, chunks = chunk_corpus(tmpdir, max_words=900)
+
+        payload = json.loads(output_stream.getvalue().split("\n", 1)[1])
+        self.assertEqual(payload["chunk_id"], chunks[0].chunk_id)
+        self.assertEqual(payload["doc_id"], "doc")
+        self.assertEqual(payload["text"], chunks[0].text)
+        self.assertEqual(payload["section_path"], "Test")
+        self.assertEqual(payload["content_hash"], chunks[0].content_hash)
+        self.assertTrue(payload["active"])
+
+    def test_main_indexes_with_shared_settings_and_reports_counts(self) -> None:
+        output_stream = io.StringIO()
+        dsn = "postgresql://test@localhost/test"
+        with (
+            patch("fieldguide_ai.cli.load_dotenv"),
+            patch.dict(os.environ, {"POSTGRES_CONNECTIONSTRING": dsn}, clear=True),
+            patch(
+                "fieldguide_ai.cli.index_corpus", return_value=IngestionResult(2, 5)
+            ) as index,
+            patch("fieldguide_ai.cli.build_provider") as provider,
+            patch("fieldguide_ai.cli.build_vector_store") as legacy_store,
+            patch("fieldguide_ai.cli.OpenAIEmbeddingProvider") as legacy_embedder,
+            redirect_stdout(output_stream),
+        ):
+            main(
+                [
+                    "--index-corpus",
+                    "docs",
+                    "--vector-store",
+                    "numpy",
+                    "--store-path",
+                    "shared-index",
+                    "--collection-name",
+                    "guides",
+                    "--embedding-model",
+                    "text-embedding-3-large",
+                    "--chunk-max-words",
+                    "450",
+                ]
             )
 
-        self.assertEqual(result.document_count, 1)
-        self.assertEqual(result.chunk_count, 1)
-        self.assertEqual(
-            output_stream.getvalue(), "Indexed 1 documents and 1 chunks.\n"
+        index.assert_called_once_with(
+            path="docs",
+            settings=RetrievalSettings(
+                store_type="numpy",
+                store_path="shared-index",
+                collection_name="guides",
+                embedding_model="text-embedding-3-large",
+                catalog_dsn=dsn,
+            ),
+            max_words=450,
         )
+        provider.assert_not_called()
+        legacy_store.assert_not_called()
+        legacy_embedder.assert_not_called()
+        self.assertEqual(
+            output_stream.getvalue(), "Indexed 2 documents and 5 chunks.\n"
+        )
+
+    def test_indexing_defaults_use_shared_store_directories(self) -> None:
+        for store_type in ("chroma", "numpy", "faiss"):
+            with (
+                self.subTest(store_type=store_type),
+                patch("fieldguide_ai.cli.load_dotenv"),
+                patch(
+                    "fieldguide_ai.cli.index_corpus", return_value=IngestionResult(1, 1)
+                ) as index,
+                redirect_stdout(io.StringIO()),
+            ):
+                main(["--index-corpus", "docs", "--vector-store", store_type])
+            settings = index.call_args.kwargs["settings"]
+            expected = "chroma_db" if store_type == "chroma" else f"{store_type}_index"
+            self.assertEqual(settings.store_path, expected)
+
+    def test_init_catalog_creates_schema_without_models_or_indexing(self) -> None:
+        dsn = "postgresql://test@localhost/test"
+        output_stream = io.StringIO()
+        with (
+            patch("fieldguide_ai.cli.load_dotenv"),
+            patch.dict(os.environ, {"POSTGRES_CONNECTIONSTRING": dsn}, clear=True),
+            patch("fieldguide_ai.cli.build_catalog") as catalog,
+            patch("fieldguide_ai.cli.build_provider") as provider,
+            patch("fieldguide_ai.cli.OpenAIEmbeddingProvider") as legacy_embedder,
+            patch("fieldguide_ai.cli.index_corpus") as index,
+            redirect_stdout(output_stream),
+        ):
+            main(["--init-catalog"])
+
+        catalog.assert_called_once_with(
+            RetrievalSettings(catalog_dsn=dsn), initialize_schema=True
+        )
+        catalog.return_value.__exit__.assert_called_once()
+        provider.assert_not_called()
+        legacy_embedder.assert_not_called()
+        index.assert_not_called()
+        self.assertEqual(output_stream.getvalue(), "Catalog schema initialized.\n")
+
+    def test_init_catalog_and_indexing_require_a_dsn(self) -> None:
+        for arguments in (["--init-catalog"], ["--index-corpus", "docs"]):
+            stderr = io.StringIO()
+            with (
+                self.subTest(arguments=arguments),
+                patch("fieldguide_ai.cli.load_dotenv"),
+                patch.dict(os.environ, {}, clear=True),
+                redirect_stderr(stderr),
+                self.assertRaisesRegex(SystemExit, "1"),
+            ):
+                main(arguments)
+            self.assertIn("catalog DSN is required", stderr.getvalue())
+
+    def test_catalog_initialization_is_a_separate_corpus_action(self) -> None:
+        for action in ("--chunk-corpus", "--index-corpus"):
+            with (
+                self.subTest(action=action),
+                redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                parse_args(["--init-catalog", action, "docs"])
+
+    def test_main_preview_needs_no_credentials_or_catalog(self) -> None:
+        with (
+            TemporaryDirectory() as tmpdir,
+            patch("fieldguide_ai.cli.load_dotenv"),
+            patch.dict(os.environ, {}, clear=True),
+            patch("fieldguide_ai.cli.build_catalog") as catalog,
+            patch("fieldguide_ai.cli.build_provider") as provider,
+            redirect_stdout(io.StringIO()) as output_stream,
+        ):
+            Path(tmpdir, "doc.md").write_text("# Test\n\nBody", encoding="utf-8")
+            main(["--chunk-corpus", tmpdir])
+
+        catalog.assert_not_called()
+        provider.assert_not_called()
+        self.assertIn(
+            "Loaded 1 documents and created 1 chunks.", output_stream.getvalue()
+        )
+
+    def test_main_reports_missing_markdown_without_a_traceback(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            stderr = io.StringIO()
+            with redirect_stderr(stderr), self.assertRaisesRegex(SystemExit, "1"):
+                main(["--chunk-corpus", str(Path(tmpdir, "missing.md"))])
+        self.assertIn("Error: Markdown source does not exist", stderr.getvalue())
 
     def test_parses_numpy_indexing_configuration(self) -> None:
         args = parse_args(

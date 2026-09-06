@@ -7,6 +7,7 @@ from fieldguide_ai.retrieval.factory import (
     build_store,
     persist_store,
 )
+from fieldguide_ai.retrieval.indexing import chunk_corpus, index_corpus
 from fieldguide_ai.retrieval.modes import RetrievalMode, retriever_config_for
 from fieldguide_ai.retrieval.settings import RetrievalSettings
 from fieldguide_ai.retrieval.sources import (
@@ -24,6 +25,8 @@ __all__ = [
     "build_embedder",
     "build_retriever",
     "build_store",
+    "chunk_corpus",
+    "index_corpus",
     "persist_store",
     "retriever_config_for",
     "sources_from_result",

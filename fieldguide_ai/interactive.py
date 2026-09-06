@@ -15,18 +15,14 @@ from rich.table import Table
 from rich.text import Text
 
 from fieldguide_ai.config import DEFAULT_SYSTEM_PROMPT, SessionConfig
-from fieldguide_ai.errors import ConfigurationError, FieldguideError
-from fieldguide_ai.ingestion import (
-    DocumentIndexingPipeline,
-    IndexingResult,
-    MarkdownSectionChunker,
-)
+from fieldguide_ai.errors import FieldguideError
 from fieldguide_ai.knowledge_bot import KnowledgeAnswer, KnowledgeBot
 from fieldguide_ai.providers import (
     ProviderRegistry,
     ProviderSpec,
     registry_from_environment,
 )
+from fieldguide_ai.retrieval import RetrievalSettings, index_corpus
 from fieldguide_ai.terminal import write_history
 from fieldguide_ai.vectorstore import (
     DEFAULT_CHROMA_PATH,
@@ -201,23 +197,6 @@ def _build_store(config: SessionConfig) -> VectorStore | None:
         path=config.store_path,
         collection_name=config.collection_name,
     )
-
-
-def index_corpus(
-    corpus_path: str,
-    vector_store: VectorStore,
-    max_words: int,
-    output_stream: TextIO = sys.stdout,
-) -> IndexingResult:
-    """Index a Markdown corpus and render the resulting counts."""
-    result = DocumentIndexingPipeline(
-        vector_store=vector_store,
-        chunker=MarkdownSectionChunker(max_words=max_words),
-    ).index_path(corpus_path)
-    output_stream.write(
-        f"Indexed {result.document_count} documents and {result.chunk_count} chunks.\n"
-    )
-    return result
 
 
 def _build_provider(
@@ -444,7 +423,7 @@ def run_wizard(
     output_stream: TextIO = sys.stdout,
     registry: ProviderRegistry | None = None,
 ) -> bool:
-    """Configure and start an interactive retrieval-grounded chat session."""
+    """Configure a chat session or ingest a corpus and report its counts."""
     provider_registry = registry or registry_from_environment()
     console = _console(output_stream)
     _show_banner(console)
@@ -472,10 +451,8 @@ def run_wizard(
         collection_name=collection_name,
         system_prompt=system_prompt,
     )
-    vector_store = _build_store(config)
-
     should_ingest = False
-    if vector_store is not None:
+    if config.store_type is not None:
         ingestion_answer = _ask(
             questionary.confirm("Run ingestion pipeline?", default=False)
         )
@@ -498,14 +475,24 @@ def run_wizard(
             return False
         max_words = int(max_words_answer)
 
-        if vector_store is not None:
-            index_corpus(
-                corpus_path=corpus_path,
-                vector_store=vector_store,
-                max_words=max_words,
-                output_stream=output_stream,
-            )
+        result = index_corpus(
+            path=corpus_path,
+            settings=RetrievalSettings(
+                store_type=config.store_type,
+                store_path=config.store_path,
+                collection_name=config.collection_name,
+                catalog_dsn=os.getenv("POSTGRES_CONNECTIONSTRING"),
+            ),
+            max_words=max_words,
+        )
+        output_stream.write(
+            f"Indexed {result.document_count} documents and "
+            f"{result.chunk_count} chunks.\n"
+        )
+        # Chat consumes legacy indexes until the retriever migration is complete.
+        return True
 
+    vector_store = _build_store(config)
     provider = _build_provider(provider_spec, config)
     _show_config(console, config)
     run_chat_loop(
@@ -531,7 +518,7 @@ def main() -> None:
     except (EOFError, KeyboardInterrupt) as error:
         print(f"Error: {error}", file=sys.stderr)
         sys.exit(1)
-    except (ConfigurationError, ModelRuntimeError) as error:
+    except (FieldguideError, ModelRuntimeError) as error:
         print(f"Error: {error}", file=sys.stderr)
         sys.exit(1)
 

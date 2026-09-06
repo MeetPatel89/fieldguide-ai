@@ -1,6 +1,7 @@
 """Tests for the rich interactive Fieldguide workflow."""
 
 import io
+import os
 import sys
 import unittest
 from typing import override
@@ -8,6 +9,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import questionary
 from model_runtime import ChatSession, Message, ProviderUnavailableError
+from vectorstore import IngestionResult
 
 from fieldguide_ai import interactive
 from fieldguide_ai.config import SessionConfig
@@ -17,6 +19,7 @@ from fieldguide_ai.providers import (
     create_provider_registry,
     get_provider,
 )
+from fieldguide_ai.retrieval import RetrievalSettings
 from fieldguide_ai.vectorstore import VectorSearchResult
 from tests.session_fakes import (
     FakeChatModel,
@@ -189,9 +192,10 @@ class InteractiveWizardTest(unittest.TestCase):
 
     def test_wizard_runs_ingestion_for_faiss(self) -> None:
         output_stream = io.StringIO()
-        vector_store = Mock()
+        dsn = "postgresql://test@localhost/test"
 
         with (
+            patch.dict(os.environ, {"POSTGRES_CONNECTIONSTRING": dsn}, clear=True),
             patch.object(
                 questionary,
                 "select",
@@ -213,22 +217,32 @@ class InteractiveWizardTest(unittest.TestCase):
                 ],
             ),
             patch.object(questionary, "confirm", return_value=Answer(True)),
-            patch.object(interactive, "OpenAIEmbeddingProvider", return_value=Mock()),
-            patch.object(interactive, "build_vector_store", return_value=vector_store),
-            patch.object(interactive, "index_corpus") as index_corpus,
-            patch.object(interactive, "run_chat_loop"),
+            patch.object(interactive, "OpenAIEmbeddingProvider") as legacy_embedder,
+            patch.object(interactive, "build_vector_store") as legacy_store,
+            patch.object(
+                interactive, "index_corpus", return_value=IngestionResult(2, 4)
+            ) as index_corpus,
+            patch.object(interactive, "run_chat_loop") as chat,
         ):
-            interactive.run_wizard(
+            completed = interactive.run_wizard(
                 output_stream=output_stream,
                 registry=self.registry,
             )
 
+        self.assertTrue(completed)
         index_corpus.assert_called_once_with(
-            corpus_path="docs",
-            vector_store=vector_store,
+            path="docs",
+            settings=RetrievalSettings(
+                store_type="faiss",
+                store_path="custom-faiss",
+                catalog_dsn=dsn,
+            ),
             max_words=450,
-            output_stream=output_stream,
         )
+        self.assertIn("Indexed 2 documents and 4 chunks.", output_stream.getvalue())
+        legacy_embedder.assert_not_called()
+        legacy_store.assert_not_called()
+        chat.assert_not_called()
 
     def test_rich_chat_displays_sources_and_raw_history(self) -> None:
         source = VectorSearchResult(

@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import asdict
 from pathlib import Path
 from typing import TextIO
 
@@ -11,19 +12,20 @@ from dotenv import load_dotenv
 from model_runtime import ChatSession, ModelRuntimeError
 
 from fieldguide_ai.config import DEFAULT_SYSTEM_PROMPT
-from fieldguide_ai.errors import ConfigurationError
-from fieldguide_ai.ingestion import (
-    DocumentIndexingPipeline,
-    IndexingResult,
-    MarkdownSectionChunker,
-    load_markdown_documents,
-)
+from fieldguide_ai.errors import ConfigurationError, FieldguideError
 from fieldguide_ai.knowledge_bot import KnowledgeBot
 from fieldguide_ai.providers import ProviderRegistry, registry_from_environment
 from fieldguide_ai.providers import (
     build_provider as build_registered_provider,
 )
 from fieldguide_ai.providers.registry import OPENAI_DEFAULT_MODEL
+from fieldguide_ai.retrieval import (
+    RetrievalSettings,
+    build_catalog,
+    chunk_corpus,
+    index_corpus,
+)
+from fieldguide_ai.retrieval.settings import DEFAULT_CHROMA_PATH
 from fieldguide_ai.terminal import write_history
 from fieldguide_ai.vectorstore import (
     DEFAULT_COLLECTION_NAME,
@@ -35,7 +37,6 @@ from fieldguide_ai.vectorstore import (
 from fieldguide_ai.vectorstore import (
     build_vector_store as build_configured_vector_store,
 )
-from fieldguide_ai.vectorstore.base import DocumentIndex
 
 DEFAULT_MODEL = OPENAI_DEFAULT_MODEL
 EXIT_COMMANDS = {":exit", ":q", ":quit", "exit", "quit"}
@@ -141,43 +142,25 @@ def preview_chunks(
     details: bool = False,
 ) -> None:
     """Load a corpus and write a preview of its chunks."""
-    documents = load_markdown_documents(corpus_path)
-    chunker = MarkdownSectionChunker(max_words=max_words)
-    chunks = chunker.chunk_documents(documents)
+    records, chunks = chunk_corpus(corpus_path, max_words)
+    records_by_id = {record.id: record for record in records}
 
     output_stream.write(
-        f"Loaded {len(documents)} documents and created {len(chunks)} chunks.\n"
+        f"Loaded {len(records)} documents and created {len(chunks)} chunks.\n"
     )
     for chunk in chunks[:limit]:
-        section = " > ".join(chunk.section_path)
-        doc_type = chunk.metadata.get("doc_type", "unknown")
+        record = records_by_id[chunk.doc_id]
+        section = chunk.section_path or ""
+        doc_type = record.structured.get("doc_type", "unknown")
         if details:
-            output_stream.write(f"\n{json.dumps(chunk.to_record(), indent=2)}\n")
+            output_stream.write(f"\n{json.dumps(asdict(chunk), indent=2)}\n")
         else:
             output_stream.write(
                 f"\n{chunk.chunk_id} [{doc_type}] {section}\n"
-                f"source: {chunk.source_path}\n"
-                f"words: {len(chunk.content.split())}\n"
-                f"{_preview_text(chunk.content)}\n"
+                f"source: {record.source}\n"
+                f"words: {len(chunk.text.split())}\n"
+                f"{_preview_text(chunk.text)}\n"
             )
-
-
-def index_corpus(
-    corpus_path: str | Path,
-    vector_store: DocumentIndex,
-    max_words: int,
-    output_stream: TextIO = sys.stdout,
-) -> IndexingResult:
-    """Load and index a Markdown corpus in a vector store."""
-    pipeline = DocumentIndexingPipeline(
-        vector_store=vector_store,
-        chunker=MarkdownSectionChunker(max_words=max_words),
-    )
-    result = pipeline.index_path(corpus_path)
-    output_stream.write(
-        f"Indexed {result.document_count} documents and {result.chunk_count} chunks.\n"
-    )
-    return result
 
 
 def _parse_bool(value: str) -> bool:
@@ -226,13 +209,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     corpus_action.add_argument(
         "--index-corpus",
         metavar="PATH",
-        help="Load, chunk, embed, and index a Markdown corpus.",
+        help="Index Markdown in Postgres and a shared vector store.",
+    )
+    corpus_action.add_argument(
+        "--init-catalog",
+        action="store_true",
+        help="Create the Postgres catalog schema using POSTGRES_CONNECTIONSTRING.",
     )
     parser.add_argument(
         "--chunk-max-words",
         type=int,
         default=900,
-        help="Maximum words per chunk when previewing or indexing. Defaults to 900.",
+        help="Maximum words per chunk (greater than 75). Defaults to 900.",
     )
     parser.add_argument(
         "--chunk-limit",
@@ -257,7 +245,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--store-path",
-        help="Storage path for Chroma, NumPy (.npz), or FAISS (file prefix).",
+        help=(
+            "Indexing uses a directory (defaults: chroma_db, numpy_index, "
+            "faiss_index). Legacy chat uses Chroma, NumPy .npz, or a FAISS prefix."
+        ),
     )
     parser.add_argument(
         "--collection-name",
@@ -282,7 +273,6 @@ def _run_main(argv: list[str] | None = None) -> None:
     """Execute the parsed Fieldguide command without translating errors."""
     load_dotenv()
     args = parse_args(argv)
-    provider_registry = registry_from_environment()
     vector_store: VectorStore | None
 
     if args.chunk_corpus:
@@ -291,30 +281,45 @@ def _run_main(argv: list[str] | None = None) -> None:
             max_words=args.chunk_max_words,
             limit=args.chunk_limit,
             details=args.chunk_details,
+            output_stream=sys.stdout,
         )
+        return
+
+    if args.init_catalog:
+        settings = RetrievalSettings(catalog_dsn=os.getenv("POSTGRES_CONNECTIONSTRING"))
+        with build_catalog(settings, initialize_schema=True):
+            pass
+        print("Catalog schema initialized.")
         return
 
     if args.index_corpus:
         if args.vector_store == "none":
             parser_error = "--vector-store none cannot be used with --index-corpus"
             raise ConfigurationError(parser_error)
-        embedding_provider = OpenAIEmbeddingProvider(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model=args.embedding_model,
-        )
-        vector_store = build_vector_store(
-            provider_name=args.vector_store,
-            embedding_provider=embedding_provider,
-            path=args.store_path,
+        settings = RetrievalSettings(
+            store_type=args.vector_store,
+            store_path=args.store_path
+            or (
+                DEFAULT_CHROMA_PATH
+                if args.vector_store == "chroma"
+                else f"{args.vector_store}_index"
+            ),
             collection_name=args.collection_name,
+            embedding_model=args.embedding_model,
+            catalog_dsn=os.getenv("POSTGRES_CONNECTIONSTRING"),
         )
-        index_corpus(
-            corpus_path=args.index_corpus,
-            vector_store=vector_store,
+        result = index_corpus(
+            path=args.index_corpus,
+            settings=settings,
             max_words=args.chunk_max_words,
+        )
+        print(
+            f"Indexed {result.document_count} documents and "
+            f"{result.chunk_count} chunks."
         )
         return
 
+    provider_registry = registry_from_environment()
     provider = build_provider(model=args.model, registry=provider_registry)
 
     if args.demo:
@@ -340,7 +345,7 @@ def main(argv: list[str] | None = None) -> None:
     """Run the Fieldguide command-line interface with stable error rendering."""
     try:
         _run_main(argv)
-    except (ConfigurationError, ModelRuntimeError) as error:
+    except (FieldguideError, ModelRuntimeError) as error:
         print(f"Error: {error}", file=sys.stderr)
         raise SystemExit(1) from error
 
