@@ -269,6 +269,13 @@ This describes observable state and tool flow; it does not expose hidden model r
 
 ## Testing and quality checks
 
+The commands below are for manual validation. Codex follows [AGENTS.md](AGENTS.md)
+and leaves post-modification formatting, linting, type checking, and test execution
+to `codex-orchestrator` unless the user explicitly asks Codex to run them. During
+orchestrated plan execution, Codex implements the assigned phase and repairs
+reported failures; the orchestrator runs its configured checks after each turn.
+Outside an orchestrated run, the user owns check execution by default.
+
 Run the unit test suite:
 
 ```bash
@@ -331,6 +338,7 @@ Do not interpret passing unit tests as evidence of answer quality or production 
 ```text
 .
 ├── .cursor/rules/          # Project rules, including README maintenance
+├── AGENTS.md               # Codex instructions and validation ownership
 ├── .env.example            # Provider keys and local Postgres configuration
 ├── docker-compose.yml      # Optional local Postgres for the retrieval migration
 ├── data/corpora/nautilus/  # Synthetic ITSM Markdown corpus plus CSV demos
@@ -381,6 +389,9 @@ The Nautilus ITSM corpus (`data/corpora/nautilus`) is synthetic enterprise suppo
 
 ## Contributing and license
 
-Keep implementation, tests, and `README.md` synchronized in the same change. Run the test and lint commands above before submitting changes.
+Keep implementation, tests, and `README.md` synchronized in the same change.
+Contributors should arrange validation before submitting changes. Codex writes
+required tests and reviews changes by inspection, while `codex-orchestrator` or
+the user executes checks under the policy in [AGENTS.md](AGENTS.md).
 
 No license file is currently included. Add one before distributing or reusing the project outside its current context.

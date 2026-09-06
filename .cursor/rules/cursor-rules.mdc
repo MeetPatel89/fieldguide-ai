@@ -29,10 +29,13 @@ How to add new cursor rules to the project
     └── ...
     ```
 
-4. Never place rule files:
+4. Never place Cursor `.mdc` rule files:
     - In the project root
     - In subdirectories outside .cursor/rules
     - In any other location
+
+   The repository-root `AGENTS.md` is the Codex instruction entry point, not a
+   Cursor `.mdc` rule. Keep shared instructions consistent with that file.
 
 5. Cursor rules have the following structure:
 

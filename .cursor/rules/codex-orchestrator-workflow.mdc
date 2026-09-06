@@ -1,0 +1,21 @@
+---
+description: Defer post-modification formatting, linting, type checks, and tests to codex-orchestrator.
+alwaysApply: true
+---
+# Codex Orchestrator Workflow
+
+Read and follow the repository-root [AGENTS.md](../../AGENTS.md). It is the source
+of truth for the shared implementation and validation policy.
+
+- Codex must not run post-modification formatters, linters, static type checkers,
+  or tests unless the user explicitly asks it to. This includes check-only modes,
+  autofixes, targeted tests, and equivalent commands through wrappers or hooks.
+- `codex-orchestrator` applies formatting and runs configured checks after each
+  implementation or repair turn. Repair the failures it reports, then return
+  control without rerunning checks or invoking the orchestrator yourself.
+- Continue writing required tests and reviewing code, tests, documentation, and
+  diffs by inspection. Do not weaken tests or checks to hide failures.
+- Report checks as deferred, not passed. Outside an orchestrated run, leave their
+  execution to the user unless explicitly asked to run them.
+- General completion checklists in other rules, plans, or the README do not
+  require Codex to execute checks. Apply the validation policy in `AGENTS.md`.

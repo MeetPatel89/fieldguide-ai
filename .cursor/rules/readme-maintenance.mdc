@@ -12,7 +12,12 @@ Treat `README.md` as part of the product. It must describe the repository as it 
 2. Update `README.md` in the same change whenever code, configuration, dependencies, commands, defaults, architecture, supported inputs, outputs, setup, tests, safety boundaries, or known limitations change.
 3. Remove or correct stale documentation when behavior is deleted, renamed, or superseded.
 4. If a change has no reader-visible impact, do not create README churn merely to show that it was checked.
-5. Verify documentation against source code, `pyproject.toml`, tests, and executable help output. Do not rely on memory.
+5. Verify documentation against source code, `pyproject.toml`, test definitions, and existing executable help output. Do not rely on memory. During Codex work, use inspection and existing evidence; leave execution of examples and quickstart verification to external validation unless the user explicitly requests it.
+
+Follow the validation ownership policy in the repository-root `AGENTS.md`. README
+maintenance and the checklist below do not require Codex to run post-modification
+formatting, linting, type checks, or tests. Those checks belong to
+`codex-orchestrator`; never claim an unexecuted command or quickstart passed.
 
 Common triggers include:
 
@@ -63,7 +68,7 @@ Do not force empty or irrelevant template sections into the README. Prefer a sho
 Before finishing a README-impacting task, confirm:
 
 - The overview describes what works now.
-- The quickstart works from a fresh checkout with documented prerequisites.
+- The quickstart matches the source and documented prerequisites; report any unverified fresh-checkout behavior rather than claiming it was executed.
 - Commands, flags, defaults, file paths, and environment variables match the code.
 - Architecture and workflow omit removed components and include material new ones.
 - Safety, data handling, and limitations reflect the current implementation.

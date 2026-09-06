@@ -103,6 +103,10 @@ When a requested change exposes an existing design problem:
 
 ## Before finalizing
 
+Perform this review by inspecting the code. Follow the validation ownership policy
+in the repository-root `AGENTS.md`: Codex must not run post-modification formatting,
+linting, type checks, or tests unless the user explicitly requests them.
+
 Review the implementation for:
 
 * single responsibility;
