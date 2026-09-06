@@ -92,3 +92,12 @@ show_error_codes = true
 init_forbid_extra = false
 init_typed = false
 warn_required_dynamic_aliases = true
+
+[tool.codex-orchestrator]
+commands = [
+  ["uv", "sync", "--locked"],
+  ["uv", "run", "--no-sync", "ruff", "format", "."],
+  ["uv", "run", "--no-sync", "ruff", "check", "."],
+  ["uv", "run", "--no-sync", "mypy"],
+  ["uv", "run", "--no-sync", "pytest"],
+]
